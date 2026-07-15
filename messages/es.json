@@ -1,0 +1,11 @@
+{
+  "Landing": {
+    "title": "nerea",
+    "tagline": "Piezas únicas, hechas a mano"
+  },
+  "Nav": {
+    "shop": "Tienda",
+    "about": "Nosotros",
+    "contact": "Contacto"
+  }
+}

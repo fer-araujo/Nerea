@@ -10,3 +10,16 @@ openspec/
 Thumbs.db
 .vscode/
 .idea/
+
+# Next.js
+/.next/
+/out/
+/node_modules/
+*.tsbuildinfo
+
+# Env files (never commit real secrets; env.example documents var names only)
+.env
+.env*.local
+
+# Vitest / coverage
+/coverage/

@@ -1,0 +1,12 @@
+# SDD planning artifacts (local only, not for the client repo)
+openspec/
+
+# Local tooling state (machine-specific, not for the shared repo)
+.atl/
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -7,5 +7,13 @@
     "shop": "Shop",
     "about": "About",
     "contact": "Contact"
+  },
+  "Product": {
+    "available": "available",
+    "sold": "sold",
+    "uniquePiece": "Unique piece",
+    "soldOut": "Unique piece — sold",
+    "viewDetails": "View piece",
+    "thumbnail": "Image {number}"
   }
 }

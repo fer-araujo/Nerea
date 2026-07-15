@@ -7,5 +7,13 @@
     "shop": "Tienda",
     "about": "Nosotros",
     "contact": "Contacto"
+  },
+  "Product": {
+    "available": "disponible",
+    "sold": "vendida",
+    "uniquePiece": "Pieza única",
+    "soldOut": "Pieza única — vendida",
+    "viewDetails": "Ver pieza",
+    "thumbnail": "Imagen {number}"
   }
 }

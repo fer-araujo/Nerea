@@ -3,10 +3,32 @@
     "title": "nerea",
     "tagline": "One-of-a-kind, handmade pieces"
   },
+  "Home": {
+    "heroHeadline": "Each piece exists only once.",
+    "heroBody": "Silver and gold worked by hand, lost-wax cast. When a piece sells, it is not made again.",
+    "heroCta": "See the pieces",
+    "featuredTitle": "Unique pieces",
+    "featuredIntro": "A selection from the atelier.",
+    "ethosTitle": "Made by hand, without hurry.",
+    "ethosBody": "Every piece is lost-wax cast and finished by hand in the atelier. No two are alike and none are remade: what you see is what there is.",
+    "specMaterialLabel": "material",
+    "specMaterialValue": ".925 silver · 14k gold",
+    "specTechniqueLabel": "technique",
+    "specTechniqueValue": "lost-wax casting",
+    "specEditionLabel": "edition",
+    "specEditionValue": "unique piece, 1 of 1",
+    "specAtelierLabel": "atelier",
+    "specAtelierValue": "handmade in mexico"
+  },
   "Nav": {
     "shop": "Shop",
     "about": "About",
     "contact": "Contact"
+  },
+  "Footer": {
+    "tagline": "Author jewelry atelier. One-of-a-kind pieces, lost-wax cast.",
+    "rights": "All rights reserved.",
+    "madeIn": "Handmade in Mexico."
   },
   "Product": {
     "available": "available",

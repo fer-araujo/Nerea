@@ -3,10 +3,32 @@
     "title": "nerea",
     "tagline": "Piezas únicas, hechas a mano"
   },
+  "Home": {
+    "heroHeadline": "Cada pieza existe una sola vez.",
+    "heroBody": "Plata y oro trabajados a mano, a la cera perdida. Cuando una pieza se vende, no se repite.",
+    "heroCta": "Ver las piezas",
+    "featuredTitle": "Piezas únicas",
+    "featuredIntro": "Una selección del taller.",
+    "ethosTitle": "Hecho a mano, sin prisa.",
+    "ethosBody": "Cada pieza se funde a la cera perdida y se termina a mano en el taller. No hay dos iguales ni reposición: la que ves es la que hay.",
+    "specMaterialLabel": "material",
+    "specMaterialValue": "plata .925 · oro 14k",
+    "specTechniqueLabel": "técnica",
+    "specTechniqueValue": "fundición a la cera perdida",
+    "specEditionLabel": "edición",
+    "specEditionValue": "pieza única, 1 de 1",
+    "specAtelierLabel": "taller",
+    "specAtelierValue": "hecho a mano en méxico"
+  },
   "Nav": {
     "shop": "Tienda",
     "about": "Nosotros",
     "contact": "Contacto"
+  },
+  "Footer": {
+    "tagline": "Taller de joyería de autor. Piezas únicas fundidas a la cera perdida.",
+    "rights": "Todos los derechos reservados.",
+    "madeIn": "Hecho a mano en México."
   },
   "Product": {
     "available": "disponible",

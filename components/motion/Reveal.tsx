@@ -3,20 +3,25 @@
 import type { ReactNode } from "react";
 import { m } from "motion/react";
 import { usePrefersReducedMotion } from "./MotionProvider";
+import {
+  DURATION_SETTLE,
+  EASE_OUT,
+  STAGGER_DELAY,
+  STAGGER_STEP,
+  staggerContainer,
+  staggerItem,
+} from "./transitions";
 
 // Tasteful, restrained Framer micro-interactions for the static landing: a
-// quiet entrance settle on the hero and a staggered reveal for the featured
-// grid. Deliberately small in scope (opacity + a few px of travel, sub-600ms,
+// quiet entrance settle and a staggered reveal for the featured grid.
+// Deliberately small in scope (opacity + a few px of travel, sub-600ms,
 // GPU-only transform/opacity). Nothing here is required to READ the page: when
 // the user prefers reduced motion these render the resting frame directly (no
 // hidden initial, so no flash-of-invisible-content and no reliance on JS to
 // reveal anything). Hover states are handled in CSS via Tailwind's `hover:`
-// variant, which is already wrapped in `@media (hover: hover)`.
-
-// Expo-out — matches the craft bar's ease [0.16, 1, 0.3, 1]. Typed as a
-// 4-tuple so it satisfies Framer's `Easing` without a cast.
-const EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
-const DURATION = 0.55;
+// variant, which is already wrapped in `@media (hover: hover)`. All timings and
+// easings come from `transitions.ts` so this module never drifts from the rest
+// of the app's Framer layer.
 
 interface RevealProps {
   children: ReactNode;
@@ -45,7 +50,7 @@ export function Reveal({
     return <div className={className}>{children}</div>;
   }
 
-  const transition = { duration: DURATION, delay, ease: EASE };
+  const transition = { duration: DURATION_SETTLE, delay, ease: EASE_OUT };
   const hidden = { opacity: 0, y };
   const shown = { opacity: 1, y: 0 };
 
@@ -95,8 +100,8 @@ export function Stagger({
   className,
   as = "div",
   trigger = "in-view",
-  stagger = 0.08,
-  delayChildren = 0.05,
+  stagger = STAGGER_STEP,
+  delayChildren = STAGGER_DELAY,
 }: StaggerProps) {
   const reduce = usePrefersReducedMotion();
 
@@ -108,10 +113,7 @@ export function Stagger({
     );
   }
 
-  const variants = {
-    hidden: {},
-    show: { transition: { staggerChildren: stagger, delayChildren } },
-  };
+  const variants = staggerContainer(stagger, delayChildren);
 
   const shared = {
     className,
@@ -155,10 +157,7 @@ export function StaggerItem({
     );
   }
 
-  const variants = {
-    hidden: { opacity: 0, y },
-    show: { opacity: 1, y: 0, transition: { duration: DURATION, ease: EASE } },
-  };
+  const variants = staggerItem(y);
 
   return as === "li" ? (
     <m.li className={className} variants={variants}>

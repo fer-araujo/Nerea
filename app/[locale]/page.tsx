@@ -7,6 +7,7 @@ import { Link } from "@/i18n/navigation";
 import { Logo } from "@/components/brand/Logo";
 import { ProductCard } from "@/components/product/ProductCard";
 import { Reveal, Stagger, StaggerItem } from "@/components/motion/Reveal";
+import { ScrollScene } from "@/components/motion/ScrollScene";
 
 export { generateStaticParams } from "@/i18n/routing";
 
@@ -54,44 +55,51 @@ export default async function LandingPage({
           editorial statement of the one-of-one / cera-perdida ethos. Type is
           the hero (no stock photography — real piece photography is a pending
           client dependency), so the composition leans on the mark, the Fraunces
-          statement, and generous gallery space rather than a filled image. */}
-      <section className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-6xl flex-col justify-center px-6 py-12 sm:px-10 sm:py-16">
-        <div className="grid items-center gap-10 lg:grid-cols-[1.3fr_1fr] lg:gap-16">
-          <Stagger
-            trigger="mount"
-            className="order-2 flex flex-col items-start lg:order-1"
-          >
-            <StaggerItem>
-              <h1 className="font-display text-[clamp(2.5rem,8vw,4.5rem)] leading-[1.03] tracking-tight text-ink">
+          statement, and generous gallery space rather than a filled image.
+
+          <ScrollScene> enhances THIS SAME markup with the GSAP scroll-scrubbed
+          intro (task 3.4) on capable devices with motion allowed; everywhere
+          else (reduced motion, low-end, no-JS) it renders untouched as the
+          approved static hero. The nodes GSAP drives carry `data-hero-*` and are
+          plain DOM — deliberately NOT Framer components — so GSAP and Framer
+          never animate the same element. */}
+      <ScrollScene>
+        <section className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-6xl flex-col justify-center px-6 py-12 sm:px-10 sm:py-16">
+          <div className="grid items-center gap-10 lg:grid-cols-[1.3fr_1fr] lg:gap-16">
+            <div className="order-2 flex flex-col items-start lg:order-1">
+              <h1
+                data-hero-lede
+                className="font-display text-[clamp(2.5rem,8vw,4.5rem)] leading-[1.03] tracking-tight text-ink"
+              >
                 {t("heroHeadline")}
               </h1>
-            </StaggerItem>
-            <StaggerItem className="mt-6 max-w-md">
-              <p className="text-base leading-relaxed text-graphite sm:text-lg">
+              <p
+                data-hero-body
+                className="mt-6 max-w-md text-base leading-relaxed text-graphite sm:text-lg"
+              >
                 {t("heroBody")}
               </p>
-            </StaggerItem>
-            <StaggerItem className="mt-9">
-              <Link
-                href="/shop"
-                className="inline-flex w-fit items-center justify-center border border-ink bg-ink px-7 py-3.5 font-sans text-sm text-bone transition-colors duration-200 hover:border-brass-deep hover:bg-brass-deep"
-              >
-                {t("heroCta")}
-              </Link>
-            </StaggerItem>
-          </Stagger>
+              <div data-hero-cta className="mt-9">
+                <Link
+                  href="/shop"
+                  className="inline-flex w-fit items-center justify-center border border-ink bg-ink px-7 py-3.5 font-sans text-sm text-bone transition-colors duration-200 hover:border-brass-deep hover:bg-brass-deep"
+                >
+                  {t("heroCta")}
+                </Link>
+              </div>
+            </div>
 
-          <Reveal
-            mode="mount"
-            delay={0.15}
-            className="order-1 flex justify-center lg:order-2 lg:justify-end"
-          >
-            <span aria-hidden="true" className="text-ink/80">
-              <Logo variant="mark" className="h-28 w-auto sm:h-44 lg:h-60" />
-            </span>
-          </Reveal>
-        </div>
-      </section>
+            <div
+              data-hero-mark
+              className="order-1 flex justify-center lg:order-2 lg:justify-end"
+            >
+              <span aria-hidden="true" className="text-ink/80">
+                <Logo variant="mark" className="h-28 w-auto sm:h-44 lg:h-60" />
+              </span>
+            </div>
+          </div>
+        </section>
+      </ScrollScene>
 
       {/* FEATURED — a curated cut of the catalog, reusing the catalog card and
           the same commerce data layer. Staggered reveal on scroll. */}

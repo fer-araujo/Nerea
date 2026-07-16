@@ -4,6 +4,7 @@ openspec/
 # Local tooling state (machine-specific, not for the shared repo)
 .atl/
 .claude/settings.local.json
+.claude/launch.json
 
 # OS / editor
 .DS_Store

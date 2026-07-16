@@ -27,6 +27,14 @@ interface FixtureProduct {
 // artisan's Sanity project has any real products. The shape mirrors the
 // Sanity schema (bilingual {es,en} fields, minor-unit price) so flipping
 // COMMERCE_SOURCE to "sanity" later needs zero downstream changes.
+//
+// `images: []` is deliberate, not an oversight: real product photography is
+// a pending client dependency (no files exist yet), so pointing at fake
+// `.jpg` paths would just 404 in the demo. An empty array already falls
+// through ProductCard's existing no-image branch (PlaceholderBlock), which
+// cycles a tinted tone per grid position — see components/ui/
+// PlaceholderBlock.tsx — so the catalog still reads as three distinct,
+// tasteful pieces instead of one broken image repeated three times.
 const FIXTURE_PRODUCTS: FixtureProduct[] = [
   {
     handle: "anillo-plata-cera-perdida",
@@ -38,10 +46,7 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
       es: "Pieza única labrada a mano en plata .925 mediante fundición a la cera perdida. Cada anillo conserva las marcas irrepetibles del proceso artesanal.",
       en: "One-of-a-kind piece hand-carved in .925 silver using the lost-wax casting technique. Every ring keeps the unrepeatable marks of the handmade process.",
     },
-    images: [
-      "/products/anillo-plata-cera-perdida-1.jpg",
-      "/products/anillo-plata-cera-perdida-2.jpg",
-    ],
+    images: [],
     price: { amount: 185000, currency: "MXN" }, // $1,850.00 MXN
     status: "available",
   },
@@ -55,7 +60,7 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
       es: "Dije en oro de 14k engastado a mano con una amatista natural. Pieza única, ya vendida.",
       en: "14k gold pendant hand-set with a natural amethyst. One-of-a-kind piece, already sold.",
     },
-    images: ["/products/dije-oro-amatista-1.jpg"],
+    images: [],
     price: { amount: 420000, currency: "MXN" }, // $4,200.00 MXN
     status: "sold",
   },
@@ -65,11 +70,16 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
       es: 'Aretes de plata "fase lunar"',
       en: 'Silver "moon phase" earrings',
     },
+    // `en` intentionally omitted on this one field only: a realistic
+    // half-translated state (the artisan hasn't gotten to every EN
+    // description yet) that exercises `resolveLocalized`'s ES fallback on
+    // real pages, not just in isolation (see tests/commerce-transforms.test.ts).
+    // Confirms task 2.20 (bilingual fallback, no blank fields) end-to-end on
+    // both /en/shop and /en/products/aretes-plata-luna.
     description: {
       es: "Aretes colgantes de plata .925 inspirados en las fases de la luna, terminados a mano con textura martillada.",
-      en: "Dangling .925 silver earrings inspired by the phases of the moon, hand-finished with a hammered texture.",
     },
-    images: ["/products/aretes-plata-luna-1.jpg"],
+    images: [],
     price: { amount: 95000, currency: "MXN" }, // $950.00 MXN
     status: "available",
   },

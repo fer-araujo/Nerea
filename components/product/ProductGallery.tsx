@@ -16,6 +16,9 @@ interface ProductGalleryProps {
 // Product-detail gallery. Client-side only because selecting a thumbnail is
 // local interaction state. Single image -> just the main frame; multiple ->
 // a keyboard-operable thumbnail strip. No image -> the material placeholder.
+// The placeholder stays the neutral bone-sunk tone (no toneIndex) here: this
+// is a standalone, single-item view with no sibling placeholder to visually
+// collide with, unlike the catalog grid (see ProductCard).
 export function ProductGallery({ images, alt, className }: ProductGalleryProps) {
   const t = useTranslations("Product");
   const gallery = images.filter(Boolean);

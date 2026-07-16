@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
-import { setRequestLocale } from "next-intl/server";
+import { getMessages, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { MotionProvider } from "@/components/motion/MotionProvider";
@@ -54,13 +54,23 @@ export default async function LocaleLayout({
 
   setRequestLocale(locale);
 
+  // `NextIntlClientProvider` needs an explicit `locale` (and `messages`) so
+  // Client Components under it (e.g. ProductGallery) can resolve
+  // translations without next-intl falling back to reading the request's
+  // `headers()` to infer the locale — a dynamic API that silently disables
+  // static generation/ISR for the whole route. Without this, product detail
+  // pages built for task 2.17 render, but never as SSG (verified via
+  // `next build -d`: "Static generation failed due to dynamic usage on
+  // /es/products/... , reason: headers").
+  const messages = await getMessages();
+
   return (
     <html
       lang={locale}
       className={`${fraunces.variable} ${spaceGrotesk.variable} ${jetBrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <NextIntlClientProvider>
+        <NextIntlClientProvider locale={locale} messages={messages}>
           <MotionProvider>{children}</MotionProvider>
         </NextIntlClientProvider>
       </body>

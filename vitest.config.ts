@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["**/*.test.ts", "**/*.test.tsx"],
+    setupFiles: ["./tests/setup-rtl.ts"],
     server: {
       deps: {
         inline: ["next-intl", "next"],

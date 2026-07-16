@@ -15,5 +15,17 @@
     "soldOut": "Unique piece — sold",
     "viewDetails": "View piece",
     "thumbnail": "Image {number}"
+  },
+  "Shop": {
+    "title": "Shop",
+    "intro": "One-of-a-kind pieces, available while they last.",
+    "emptyTitle": "No pieces on display yet",
+    "emptyBody": "The atelier is preparing the next collection — check back soon."
+  },
+  "ProductDetail": {
+    "acquireCta": "Acquire this piece",
+    "notFoundTitle": "This piece isn't here anymore",
+    "notFoundBody": "The link may be broken, or the piece was removed from the catalog.",
+    "notFoundCta": "Back to the shop"
   }
 }

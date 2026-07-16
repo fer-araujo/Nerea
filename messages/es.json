@@ -15,5 +15,17 @@
     "soldOut": "Pieza única — vendida",
     "viewDetails": "Ver pieza",
     "thumbnail": "Imagen {number}"
+  },
+  "Shop": {
+    "title": "Tienda",
+    "intro": "Piezas únicas, disponibles mientras existan.",
+    "emptyTitle": "Todavía no hay piezas en exhibición",
+    "emptyBody": "El taller está preparando la próxima colección — vuelve pronto."
+  },
+  "ProductDetail": {
+    "acquireCta": "Adquirir esta pieza",
+    "notFoundTitle": "Esta pieza ya no está aquí",
+    "notFoundBody": "El enlace puede estar roto o la pieza fue retirada del catálogo.",
+    "notFoundCta": "Volver a la tienda"
   }
 }

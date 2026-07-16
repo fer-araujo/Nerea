@@ -10,6 +10,8 @@ interface ProductCardProps {
   product: ProductSummary;
   /** Set on above-the-fold cards to prioritize their image for LCP. */
   priority?: boolean;
+  /** Position within the rendered grid — cycles the no-photo placeholder tone. */
+  index?: number;
   className?: string;
 }
 
@@ -17,7 +19,7 @@ interface ProductCardProps {
 // then the mono spec-plate as a strong horizontal datum under a hairline, then
 // the piece name (Fraunces) paired with its price (mono). Purely prop-driven —
 // pages fetch and pass the view model.
-export function ProductCard({ product, priority, className }: ProductCardProps) {
+export function ProductCard({ product, priority, index, className }: ProductCardProps) {
   const isSold = product.availability === "sold";
 
   return (
@@ -38,7 +40,7 @@ export function ProductCard({ product, priority, className }: ProductCardProps) 
               )}
             />
           ) : (
-            <PlaceholderBlock className="absolute inset-0" />
+            <PlaceholderBlock className="absolute inset-0" toneIndex={index} />
           )}
         </div>
 

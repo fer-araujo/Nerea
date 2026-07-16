@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="nerea">
+  <path d="M32 11 L49 28 L32 53 L15 28 Z" stroke="#A9814E" stroke-width="1.25" fill="none" />
+  <path d="M15 28 H49" stroke="#A9814E" stroke-width="1.25" />
+  <path d="M32 11 L24 28 L32 53" stroke="#6B6259" stroke-width="0.75" opacity="0.55" fill="none" />
+  <path d="M32 11 L40 28 L32 53" stroke="#6B6259" stroke-width="0.75" opacity="0.55" fill="none" />
+</svg>

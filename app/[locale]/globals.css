@@ -1,26 +1,87 @@
 @import "tailwindcss";
 
+/*
+  nerea — design tokens (Mid-Century-Modern synthesis: precision holding warmth)
+  ----------------------------------------------------------------------------
+  One light "gallery" theme. Every color derives from the tokens below; the
+  palette is deliberately tight (MCM restraint). Brass is an accent used almost
+  never; deep gemstone green is reserved ONLY for the "available" signal; the
+  mono spec-plate carries the identity, so everything else stays quiet.
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Canvas — warm bone gallery light (dominant). Not the AI-cliche cream. */
+  --bone: #f5f0e8;
+  --bone-raised: #faf6ef; /* lifted surfaces */
+  --bone-sunk: #ece4d6; /* image wells / recessed material blocks */
+
+  /* Ink — warm near-black text + patina graphite secondary/hairlines */
+  --ink: #1b1815;
+  --graphite: #6b6259;
+  --obsidian: #1a1714; /* rare dark punctuation only */
+
+  /* Accents — extreme restraint */
+  --brass: #a9814e; /* matte laton */
+  --brass-deep: #8a6a3f; /* brass on light, hover/active */
+  --jade: #3b5245; /* gemstone green — the "available" signal, nothing else */
+
+  /* Hairlines */
+  --line: #ddd4c5;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-bone: var(--bone);
+  --color-bone-raised: var(--bone-raised);
+  --color-bone-sunk: var(--bone-sunk);
+  --color-ink: var(--ink);
+  --color-graphite: var(--graphite);
+  --color-obsidian: var(--obsidian);
+  --color-brass: var(--brass);
+  --color-brass-deep: var(--brass-deep);
+  --color-jade: var(--jade);
+  --color-line: var(--line);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-background: var(--bone);
+  --color-foreground: var(--ink);
+
+  /* Display = Fraunces (brief-mandated warm serif), UI = Space Grotesk,
+     data/spec-plates/prices = JetBrains Mono. Wired in layout.tsx. */
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-grotesk);
+  --font-mono: var(--font-jetbrains);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bone);
+  color: var(--ink);
+  font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Fraunces optical sizing — let the warm serif breathe at display sizes. */
+.font-display {
+  font-optical-sizing: auto;
+}
+
+/* Visible keyboard focus everywhere (brass, the one place accent earns its keep). */
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--brass);
+  color: var(--bone);
+}
+
+/* Respect user motion preference globally. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

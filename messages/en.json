@@ -49,5 +49,58 @@
     "notFoundTitle": "This piece isn't here anymore",
     "notFoundBody": "The link may be broken, or the piece was removed from the catalog.",
     "notFoundCta": "Back to the shop"
+  },
+  "Cart": {
+    "title": "Cart",
+    "trigger": "Cart ({count})",
+    "empty": "Your cart is empty",
+    "emptyBody": "Browse the shop to find your next unique piece.",
+    "browseCta": "Go to the shop",
+    "remove": "Remove",
+    "removeLabel": "Remove {title} from cart",
+    "subtotal": "Subtotal",
+    "checkout": "Proceed to payment",
+    "checkingOut": "Processing…",
+    "close": "Close cart",
+    "soldNotice": "This piece just sold",
+    "errorRetry": "Payment could not start. Please try again."
+  },
+  "Checkout": {
+    "successKicker": "Order confirmed",
+    "successTitle": "Thank you for your purchase",
+    "successBody": "Your piece is confirmed. The atelier will reach out with shipping details.",
+    "successCta": "Keep browsing"
+  },
+  "About": {
+    "kicker": "The atelier",
+    "title": "Every piece begins in wax.",
+    "intro": "nerea is a one-person atelier. Every piece is designed, cast, and finished by hand, start to finish.",
+    "processTitle": "From wax to piece",
+    "processBody": "The technique is lost-wax casting: the piece is first carved in wax, cast in .925 silver or 14k gold, then finished by hand — polishing, texture, and stone-setting, one at a time.",
+    "materialsTitle": "Materials and stones",
+    "materialsBody": "Silver, gold, and a selection of natural stones, chosen for character rather than uniformity. The process is slow on purpose: a piece leaves the atelier when it's ready, not before.",
+    "specOriginLabel": "origin",
+    "specOriginValue": "independent atelier, mexico",
+    "specTechniqueLabel": "technique",
+    "specTechniqueValue": "lost-wax casting",
+    "specMaterialLabel": "materials",
+    "specMaterialValue": ".925 silver · 14k gold · natural stones",
+    "specEditionLabel": "edition",
+    "specEditionValue": "unique piece — never remade",
+    "cta": "See the pieces"
+  },
+  "Contact": {
+    "kicker": "Contact",
+    "title": "Write to the atelier.",
+    "intro": "Every message is read and answered directly from the atelier — no intermediaries.",
+    "nameLabel": "Name",
+    "namePlaceholder": "Your name",
+    "emailLabel": "Email",
+    "emailPlaceholder": "you@email.com",
+    "messageLabel": "Message",
+    "messagePlaceholder": "Tell us about the piece you're looking for…",
+    "submit": "Send message",
+    "successTitle": "Message received",
+    "successBody": "Thank you for writing — the artisan will reply personally as soon as she can."
   }
 }

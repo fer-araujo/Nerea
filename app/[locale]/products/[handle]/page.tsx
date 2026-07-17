@@ -95,7 +95,11 @@ export default async function ProductDetailPage({
           />
 
           {!isSold && (
-            <AcquireButton label={t("acquireCta")} className="mt-2" />
+            <AcquireButton
+              label={t("acquireCta")}
+              product={product}
+              className="mt-2"
+            />
           )}
         </div>
       </div>

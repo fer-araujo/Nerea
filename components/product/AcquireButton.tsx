@@ -1,27 +1,32 @@
 "use client";
 
+import type { ProductSummary } from "@/lib/commerce/types";
+import { useCart } from "@/lib/cart/cart-context";
 import { cn } from "@/lib/cn";
 
 interface AcquireButtonProps {
   label: string;
+  product: Pick<ProductSummary, "handle" | "title" | "price" | "image">;
   className?: string;
 }
 
-// Day 2 placeholder for the acquire/checkout entry point. Cart state and the
-// Stripe Checkout handoff don't exist until Day 4 (lib/cart, lib/commerce/
-// stripe — see design.md "Day 4 — Cart, Checkout Handoff"), so this is
-// intentionally a real, on-brand, clickable CTA (not disabled — the Day 2
-// demo should show the full "available" product-detail state) whose click
-// handler is a documented no-op. It must never fake a cart action (no toast,
-// no state change, no navigation) — that would misrepresent functionality
-// that isn't built yet.
-export function AcquireButton({ label, className }: AcquireButtonProps) {
+// Adds the piece to the cart (CartProvider.addItem also opens the drawer —
+// that IS the "added" feedback, per spec: "Adding a product updates the
+// drawer"). Never rendered for a sold piece; the product detail page already
+// gates that above this component (see app/[locale]/products/[handle]/
+// page.tsx), so there is no availability check here — this button's sole
+// job is the add-to-cart action.
+export function AcquireButton({
+  label,
+  product,
+  className,
+}: AcquireButtonProps) {
+  const { addItem } = useCart();
+
   return (
     <button
       type="button"
-      // TODO(day-4): wire to lib/cart's add-to-cart action once the cart
-      // context and Stripe Checkout Session handoff exist.
-      onClick={() => {}}
+      onClick={() => addItem(product)}
       className={cn(
         "inline-flex w-fit items-center justify-center border border-ink bg-ink px-6 py-3 font-sans text-sm text-bone transition-colors duration-200 hover:border-brass-deep hover:bg-brass-deep",
         className,

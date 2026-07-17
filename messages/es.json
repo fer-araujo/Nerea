@@ -49,5 +49,58 @@
     "notFoundTitle": "Esta pieza ya no está aquí",
     "notFoundBody": "El enlace puede estar roto o la pieza fue retirada del catálogo.",
     "notFoundCta": "Volver a la tienda"
+  },
+  "Cart": {
+    "title": "Carrito",
+    "trigger": "Carrito ({count})",
+    "empty": "Tu carrito está vacío",
+    "emptyBody": "Explora la tienda para encontrar tu próxima pieza única.",
+    "browseCta": "Ver la tienda",
+    "remove": "Eliminar",
+    "removeLabel": "Eliminar {title} del carrito",
+    "subtotal": "Subtotal",
+    "checkout": "Proceder al pago",
+    "checkingOut": "Procesando…",
+    "close": "Cerrar carrito",
+    "soldNotice": "Esta pieza acaba de venderse",
+    "errorRetry": "No se pudo iniciar el pago. Intenta de nuevo."
+  },
+  "Checkout": {
+    "successKicker": "Pedido confirmado",
+    "successTitle": "Gracias por tu compra",
+    "successBody": "Tu pieza está confirmada. El taller se pondrá en contacto contigo con los detalles de envío.",
+    "successCta": "Seguir explorando"
+  },
+  "About": {
+    "kicker": "El taller",
+    "title": "Cada pieza empieza en cera.",
+    "intro": "nerea es un taller de una sola persona. Cada pieza se diseña, funde y termina a mano, de principio a fin.",
+    "processTitle": "De la cera a la pieza",
+    "processBody": "La técnica es la fundición a la cera perdida: la pieza se talla primero en cera, se funde en plata ley .925 u oro de 14 quilates, y se termina a mano — pulido, texturas y el engastado de las piedras, una por una.",
+    "materialsTitle": "Materiales y piedras",
+    "materialsBody": "Plata, oro y una selección de piedras naturales, elegidas por su carácter y no por uniformidad. El proceso es lento a propósito: cada pieza sale del taller cuando está lista, no antes.",
+    "specOriginLabel": "origen",
+    "specOriginValue": "taller independiente, méxico",
+    "specTechniqueLabel": "técnica",
+    "specTechniqueValue": "fundición a la cera perdida",
+    "specMaterialLabel": "materiales",
+    "specMaterialValue": "plata .925 · oro 14k · piedras naturales",
+    "specEditionLabel": "edición",
+    "specEditionValue": "pieza única — sin reposición",
+    "cta": "Ver las piezas"
+  },
+  "Contact": {
+    "kicker": "Contacto",
+    "title": "Escríbele al taller.",
+    "intro": "Cada mensaje se lee y se responde directamente desde el taller — sin intermediarios.",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "Tu nombre",
+    "emailLabel": "Correo",
+    "emailPlaceholder": "tu@correo.com",
+    "messageLabel": "Mensaje",
+    "messagePlaceholder": "Cuéntanos sobre la pieza que buscas…",
+    "submit": "Enviar mensaje",
+    "successTitle": "Mensaje recibido",
+    "successBody": "Gracias por escribir — la artesana te responderá personalmente en cuanto pueda."
   }
 }

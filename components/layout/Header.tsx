@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Logo } from "@/components/brand/Logo";
 import { LocaleSwitcher } from "./LocaleSwitcher";
+import { CartTrigger } from "./CartTrigger";
 
 // Quiet brand shell header. Sticky and translucent (content scrolls under the
 // blurred bone), with a single hairline underneath — no heavy bar. Height is
@@ -31,6 +32,7 @@ export async function Header({ locale }: { locale: string }) {
           >
             {t("shop")}
           </Link>
+          <CartTrigger />
           <LocaleSwitcher />
         </nav>
       </div>

@@ -2,9 +2,11 @@ import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Logo } from "@/components/brand/Logo";
 
-// Minimal atelier footer: the wordmark, a one-line credit, the single live
-// route (shop; about/contact join on Day 4), and a quiet baseline. No version
-// stamps, no atmospheric locale strip — just the mark and the maker's credit.
+// Minimal atelier footer: the wordmark, a one-line credit, the secondary nav
+// (shop, about, contact — the primary Shop CTA lives in the sticky Header;
+// About/Contact live here to keep the height-capped Header quiet on mobile),
+// and a quiet baseline. No version stamps, no atmospheric locale strip — just
+// the mark and the maker's credit.
 export async function Footer({ locale }: { locale: string }) {
   const t = await getTranslations({ locale, namespace: "Footer" });
   const nav = await getTranslations({ locale, namespace: "Nav" });
@@ -30,6 +32,18 @@ export async function Footer({ locale }: { locale: string }) {
               className="w-fit text-ink transition-colors hover:text-brass-deep"
             >
               {nav("shop")}
+            </Link>
+            <Link
+              href="/about"
+              className="w-fit text-ink transition-colors hover:text-brass-deep"
+            >
+              {nav("about")}
+            </Link>
+            <Link
+              href="/contact"
+              className="w-fit text-ink transition-colors hover:text-brass-deep"
+            >
+              {nav("contact")}
             </Link>
           </nav>
         </div>

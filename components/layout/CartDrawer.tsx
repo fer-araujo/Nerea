@@ -105,7 +105,12 @@ export function CartDrawer() {
                 type="button"
                 onClick={handleClose}
                 aria-label={t("close")}
-                className="font-mono text-lg text-graphite transition-colors hover:text-ink"
+                // -m-2 + size-11 keeps the glyph visually anchored to the
+                // header's edge while growing the tap target to a WCAG
+                // 2.5.8-safe 44px square (previously just the "x" glyph's
+                // own tiny bounding box — a real mobile tap-target gap this
+                // control, mounted on every page, would otherwise carry).
+                className="-m-2 flex size-11 items-center justify-center font-mono text-lg text-graphite transition-colors hover:text-ink"
               >
                 <span aria-hidden="true">&times;</span>
               </button>

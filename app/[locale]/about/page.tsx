@@ -36,7 +36,7 @@ export default async function AboutPage({
 
   return (
     <main className="flex-1">
-      <section className="mx-auto w-full max-w-3xl px-6 py-16 sm:px-10 sm:py-24">
+      <section className="mx-auto w-full max-w-6xl px-6 py-16 sm:px-10 sm:py-24">
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-graphite">
           {t("kicker")}
         </p>
@@ -82,7 +82,7 @@ export default async function AboutPage({
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-3xl px-6 py-16 sm:px-10 sm:py-20">
+      <section className="mx-auto w-full max-w-6xl px-6 py-16 sm:px-10 sm:py-20">
         <Link
           href="/shop"
           className="font-mono text-sm text-ink underline decoration-line underline-offset-4 transition-colors hover:decoration-brass"

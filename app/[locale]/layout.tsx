@@ -5,8 +5,10 @@ import { getMessages, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { MotionProvider } from "@/components/motion/MotionProvider";
+import { CartProvider } from "@/lib/cart/cart-context";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { CartDrawer } from "@/components/layout/CartDrawer";
 import "./globals.css";
 
 export { generateStaticParams } from "@/i18n/routing";
@@ -74,9 +76,12 @@ export default async function LocaleLayout({
       <body className="min-h-full flex flex-col">
         <NextIntlClientProvider locale={locale} messages={messages}>
           <MotionProvider>
-            <Header locale={locale} />
-            {children}
-            <Footer locale={locale} />
+            <CartProvider>
+              <Header locale={locale} />
+              {children}
+              <Footer locale={locale} />
+              <CartDrawer />
+            </CartProvider>
           </MotionProvider>
         </NextIntlClientProvider>
       </body>

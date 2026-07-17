@@ -49,5 +49,26 @@
     "notFoundTitle": "This piece isn't here anymore",
     "notFoundBody": "The link may be broken, or the piece was removed from the catalog.",
     "notFoundCta": "Back to the shop"
+  },
+  "Cart": {
+    "title": "Cart",
+    "trigger": "Cart ({count})",
+    "empty": "Your cart is empty",
+    "emptyBody": "Browse the shop to find your next unique piece.",
+    "browseCta": "Go to the shop",
+    "remove": "Remove",
+    "removeLabel": "Remove {title} from cart",
+    "subtotal": "Subtotal",
+    "checkout": "Proceed to payment",
+    "checkingOut": "Processing…",
+    "close": "Close cart",
+    "soldNotice": "This piece just sold",
+    "errorRetry": "Payment could not start. Please try again."
+  },
+  "Checkout": {
+    "successKicker": "Order confirmed",
+    "successTitle": "Thank you for your purchase",
+    "successBody": "Your piece is confirmed. The atelier will reach out with shipping details.",
+    "successCta": "Keep browsing"
   }
 }

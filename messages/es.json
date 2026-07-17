@@ -49,5 +49,26 @@
     "notFoundTitle": "Esta pieza ya no está aquí",
     "notFoundBody": "El enlace puede estar roto o la pieza fue retirada del catálogo.",
     "notFoundCta": "Volver a la tienda"
+  },
+  "Cart": {
+    "title": "Carrito",
+    "trigger": "Carrito ({count})",
+    "empty": "Tu carrito está vacío",
+    "emptyBody": "Explora la tienda para encontrar tu próxima pieza única.",
+    "browseCta": "Ver la tienda",
+    "remove": "Eliminar",
+    "removeLabel": "Eliminar {title} del carrito",
+    "subtotal": "Subtotal",
+    "checkout": "Proceder al pago",
+    "checkingOut": "Procesando…",
+    "close": "Cerrar carrito",
+    "soldNotice": "Esta pieza acaba de venderse",
+    "errorRetry": "No se pudo iniciar el pago. Intenta de nuevo."
+  },
+  "Checkout": {
+    "successKicker": "Pedido confirmado",
+    "successTitle": "Gracias por tu compra",
+    "successBody": "Tu pieza está confirmada. El taller se pondrá en contacto contigo con los detalles de envío.",
+    "successCta": "Seguir explorando"
   }
 }

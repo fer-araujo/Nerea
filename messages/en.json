@@ -102,5 +102,24 @@
     "submit": "Send message",
     "successTitle": "Message received",
     "successBody": "Thank you for writing — the artisan will reply personally as soon as she can."
+  },
+  "Meta": {
+    "ogImageAlt": "nerea — author jewelry atelier, one-of-a-kind handmade pieces",
+    "home": {
+      "title": "nerea — author jewelry, one-of-a-kind handmade pieces",
+      "description": "Silver and gold worked by hand, lost-wax cast in Mexico. Every piece exists only once: when it sells, it is not made again."
+    },
+    "shop": {
+      "title": "Shop",
+      "description": "Browse the atelier's available pieces: silver and gold, lost-wax cast, never remade. Each one unique, while it lasts."
+    },
+    "about": {
+      "title": "The atelier",
+      "description": "The process behind every piece: lost-wax casting, materials, and the artisan behind the atelier."
+    },
+    "contact": {
+      "title": "Contact",
+      "description": "Write directly to the atelier with questions about a piece or a custom commission."
+    }
   }
 }

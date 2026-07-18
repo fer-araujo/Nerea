@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { Fraunces, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
-import { getMessages, setRequestLocale } from "next-intl/server";
+import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
+import { getSiteUrl, ogLocale, SITE_NAME } from "@/lib/seo";
 import { MotionProvider } from "@/components/motion/MotionProvider";
 import { CartProvider } from "@/lib/cart/cart-context";
 import { Header } from "@/components/layout/Header";
@@ -38,10 +39,39 @@ const jetBrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: "nerea",
-  description: "Piezas únicas, hechas a mano",
-};
+// Site-wide defaults only: `metadataBase` (so every relative/absolute URL
+// built in per-route `generateMetadata` resolves correctly, task 5.1) and a
+// bottom-of-stack fallback title/description/OG/Twitter. Every real route
+// under this layout (landing, shop, product detail, about, contact) sets
+// its own complete `generateMetadata` via lib/seo.ts's `buildPageMetadata`
+// — this layout-level metadata rarely if ever surfaces, but Next.js
+// requires *some* resolvable title, and it's the correct place for
+// `metadataBase`, which every child segment's relative URLs depend on.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale: rawLocale } = await params;
+  const locale = hasLocale(routing.locales, rawLocale)
+    ? rawLocale
+    : routing.defaultLocale;
+  const t = await getTranslations({ locale, namespace: "Meta" });
+
+  return {
+    metadataBase: new URL(getSiteUrl()),
+    title: t("home.title"),
+    description: t("home.description"),
+    openGraph: {
+      type: "website",
+      siteName: SITE_NAME,
+      locale: ogLocale(locale),
+    },
+    twitter: {
+      card: "summary_large_image",
+    },
+  };
+}
 
 export default async function LocaleLayout({
   children,

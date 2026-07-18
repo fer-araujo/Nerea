@@ -102,5 +102,24 @@
     "submit": "Enviar mensaje",
     "successTitle": "Mensaje recibido",
     "successBody": "Gracias por escribir — la artesana te responderá personalmente en cuanto pueda."
+  },
+  "Meta": {
+    "ogImageAlt": "nerea — taller de joyería de autor, piezas únicas hechas a mano",
+    "home": {
+      "title": "nerea — joyería de autor, piezas únicas hechas a mano",
+      "description": "Plata y oro trabajados a mano, fundidos a la cera perdida en México. Cada pieza es una sola vez: cuando se vende, no se repite."
+    },
+    "shop": {
+      "title": "Tienda",
+      "description": "Explora las piezas disponibles del taller: plata y oro fundidos a la cera perdida, sin reposición. Cada pieza es única mientras dure."
+    },
+    "about": {
+      "title": "El taller",
+      "description": "Conoce el proceso detrás de cada pieza: fundición a la cera perdida, materiales y la artesana detrás del taller."
+    },
+    "contact": {
+      "title": "Contacto",
+      "description": "Escríbele directamente al taller para preguntas sobre una pieza o un encargo a medida."
+    }
   }
 }

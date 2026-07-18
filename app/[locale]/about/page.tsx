@@ -1,10 +1,32 @@
+import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { routing } from "@/i18n/routing";
 import { Link } from "@/i18n/navigation";
+import { buildPageMetadata, pageTitle } from "@/lib/seo";
 import { Reveal } from "@/components/motion/Reveal";
 
 export { generateStaticParams } from "@/i18n/routing";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale: rawLocale } = await params;
+  const locale = hasLocale(routing.locales, rawLocale)
+    ? rawLocale
+    : routing.defaultLocale;
+  const t = await getTranslations({ locale, namespace: "Meta" });
+
+  return buildPageMetadata({
+    locale,
+    pathname: "/about",
+    title: pageTitle(t("about.title")),
+    description: t("about.description"),
+    ogImageAlt: t("ogImageAlt"),
+  });
+}
 
 // Fully static — no commerce data, no ISR window needed (design.md —
 // Rendering / Data-Fetching Strategy: "/about" is SSG, copy from messages

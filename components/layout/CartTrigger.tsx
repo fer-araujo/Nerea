@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 // drawer; the drawer itself renders once, globally, from the locale layout
 // (see CartDrawer.tsx / app/[locale]/layout.tsx).
 export function CartTrigger({ className }: { className?: string }) {
+  // `Cart` copy is DRAFT PENDING ARTISAN REVIEW — see CartDrawer.tsx.
   const t = useTranslations("Cart");
   const { items, open } = useCart();
   const count = items.length;

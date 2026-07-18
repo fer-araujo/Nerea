@@ -1,9 +1,11 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { commerce } from "@/lib/commerce";
 import { routing } from "@/i18n/routing";
 import { cn } from "@/lib/cn";
+import { buildPageMetadata, pageTitle, truncateDescription } from "@/lib/seo";
 import { Price } from "@/components/ui/Price";
 import { Badge } from "@/components/ui/Badge";
 import { ProductGallery } from "@/components/product/ProductGallery";
@@ -30,6 +32,43 @@ export async function generateStaticParams({
 }
 
 export const revalidate = 60;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string; handle: string }>;
+}): Promise<Metadata> {
+  const { locale: rawLocale, handle } = await params;
+  const locale = hasLocale(routing.locales, rawLocale)
+    ? rawLocale
+    : routing.defaultLocale;
+
+  // Same defensive pattern as the page component below: an unrecognized
+  // handle resolves to `null`, and a data-layer failure is treated the
+  // same way — metadata generation must never crash the build/request.
+  const product = await commerce
+    .getProductByHandle(handle, locale)
+    .catch(() => null);
+
+  if (!product) {
+    const t = await getTranslations({ locale, namespace: "ProductDetail" });
+    return {
+      title: pageTitle(t("notFoundTitle")),
+      description: t("notFoundBody"),
+      robots: { index: false, follow: false },
+    };
+  }
+
+  const tMeta = await getTranslations({ locale, namespace: "Meta" });
+
+  return buildPageMetadata({
+    locale,
+    pathname: `/products/${handle}`,
+    title: pageTitle(product.title),
+    description: truncateDescription(product.description),
+    ogImageAlt: tMeta("ogImageAlt"),
+  });
+}
 
 export default async function ProductDetailPage({
   params,

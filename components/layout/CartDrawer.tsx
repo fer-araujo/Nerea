@@ -21,6 +21,9 @@ import { cn } from "@/lib/cn";
 // without JS (it's interaction-only, mounted client-side from the first
 // "add to cart" click), so it doesn't need Reveal's extra manual branch.
 export function CartDrawer() {
+  // `Cart` copy (empty state, errors, checkout CTA) is assistant-drafted —
+  // DRAFT PENDING ARTISAN REVIEW, same status as `About`/`Contact` (task
+  // 5.5 content checklist). Also consumed by CartTrigger.tsx.
   const t = useTranslations("Cart");
   // Safe: this component only ever renders under NextIntlClientProvider
   // with a locale sourced from routing.locales (layout.tsx), so the value

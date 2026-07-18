@@ -1,9 +1,31 @@
+import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { routing } from "@/i18n/routing";
+import { buildPageMetadata, pageTitle } from "@/lib/seo";
 import { ContactForm } from "@/components/contact/ContactForm";
 
 export { generateStaticParams } from "@/i18n/routing";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale: rawLocale } = await params;
+  const locale = hasLocale(routing.locales, rawLocale)
+    ? rawLocale
+    : routing.defaultLocale;
+  const t = await getTranslations({ locale, namespace: "Meta" });
+
+  return buildPageMetadata({
+    locale,
+    pathname: "/contact",
+    title: pageTitle(t("contact.title")),
+    description: t("contact.description"),
+    ogImageAlt: t("ogImageAlt"),
+  });
+}
 
 // Fully static shell (design.md: "/contact" is SSG, no catalog data); only
 // the form itself is a client island (ContactForm) so submit can be

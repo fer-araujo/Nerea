@@ -1,9 +1,11 @@
+import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { commerce } from "@/lib/commerce";
 import type { Locale, ProductSummary } from "@/lib/commerce/types";
 import { routing } from "@/i18n/routing";
 import { Link } from "@/i18n/navigation";
+import { buildPageMetadata } from "@/lib/seo";
 import { Logo } from "@/components/brand/Logo";
 import { ProductCard } from "@/components/product/ProductCard";
 import { Reveal, Stagger, StaggerItem } from "@/components/motion/Reveal";
@@ -14,6 +16,26 @@ export { generateStaticParams } from "@/i18n/routing";
 // Landing is statically generated; featured pieces refresh on the same 60s ISR
 // window as the catalog (design.md — Rendering / Data-Fetching Strategy).
 export const revalidate = 60;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale: rawLocale } = await params;
+  const locale = hasLocale(routing.locales, rawLocale)
+    ? rawLocale
+    : routing.defaultLocale;
+  const t = await getTranslations({ locale, namespace: "Meta" });
+
+  return buildPageMetadata({
+    locale,
+    pathname: "",
+    title: t("home.title"),
+    description: t("home.description"),
+    ogImageAlt: t("ogImageAlt"),
+  });
+}
 
 async function getFeatured(locale: Locale): Promise<ProductSummary[]> {
   try {
@@ -39,6 +61,10 @@ export default async function LandingPage({
     : routing.defaultLocale;
   setRequestLocale(locale);
 
+  // `Home` (hero/featured/ethos copy) is assistant-drafted from the brief,
+  // same as `About`/`Contact` — DRAFT PENDING ARTISAN REVIEW (task 5.5
+  // content checklist; spec: brand-pages — Draft Content Marking applies to
+  // brand-voice copy generally, not only the About/Contact pages).
   const t = await getTranslations("Home");
   const featured = await getFeatured(locale);
 

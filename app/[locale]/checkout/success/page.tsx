@@ -1,7 +1,33 @@
+import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { routing } from "@/i18n/routing";
 import { Link } from "@/i18n/navigation";
+import { pageTitle } from "@/lib/seo";
+
+// Session-specific post-payment confirmation — never worth indexing, and
+// there's nothing generic to show a crawler anyway (task 5.1: keep
+// /checkout out of indexing, alongside /studio). robots.ts also disallows
+// crawling the whole /[locale]/checkout subtree; this is the belt-and-
+// suspenders per-page noindex directive for anyone who lands here from a
+// shared link instead of a crawl.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale: rawLocale } = await params;
+  const locale = hasLocale(routing.locales, rawLocale)
+    ? rawLocale
+    : routing.defaultLocale;
+  const t = await getTranslations({ locale, namespace: "Checkout" });
+
+  return {
+    title: pageTitle(t("successTitle")),
+    description: t("successBody"),
+    robots: { index: false, follow: false },
+  };
+}
 
 // Minimal, on-brand post-payment confirmation — the Stripe Checkout
 // Session's `success_url` target (lib/cart/checkout.ts). There is no order
@@ -20,6 +46,9 @@ export default async function CheckoutSuccessPage({
     : routing.defaultLocale;
   setRequestLocale(locale);
 
+  // `Checkout` copy (success confirmation) is assistant-drafted — DRAFT
+  // PENDING ARTISAN REVIEW, same status as `About`/`Contact` (task 5.5
+  // content checklist).
   const t = await getTranslations("Checkout");
 
   return (

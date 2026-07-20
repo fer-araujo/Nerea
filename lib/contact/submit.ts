@@ -21,27 +21,21 @@ export type SubmitContactResult =
   | { ok: true }
   | { ok: false; error: "validation" | "rate_limit" | "server" };
 
-// The client can be behind a proxy/CDN (Vercel), so the "real" IP is a
-// header, never a platform-level request.ip. Reads the first entry of a
-// possibly comma-separated X-Forwarded-For chain (the entry closest to the
-// actual client), falls back to X-Real-Ip, and finally to a fixed shared key
-// so the limiter still behaves (fails closed, not open) when neither header
-// is present — e.g. local dev.
+// Rate-limit key = the client IP, taken ONLY from a header the platform sets
+// and the caller cannot forge. On Vercel, `x-real-ip` is set by the edge to
+// the real client IP. We deliberately do NOT read `x-forwarded-for`: its
+// leftmost entry is client-appendable, so keying the limiter on it lets an
+// attacker send a fresh spoofed value per request and bypass the limit
+// entirely (a confirmed bypass — see security review). When no trusted header
+// is present (local dev, or a platform that doesn't set it) we fall back to a
+// single shared bucket, so unattributable requests are limited COLLECTIVELY
+// (fails closed) rather than each getting a free pass.
 async function resolveClientIp(): Promise<string> {
   const headerList = await headers();
 
-  const forwardedFor = headerList.get("x-forwarded-for");
-  if (forwardedFor) {
-    const [first] = forwardedFor.split(",");
-    const candidate = first?.trim();
-    if (candidate) {
-      return candidate;
-    }
-  }
-
-  const realIp = headerList.get("x-real-ip");
-  if (realIp?.trim()) {
-    return realIp.trim();
+  const realIp = headerList.get("x-real-ip")?.trim();
+  if (realIp) {
+    return realIp;
   }
 
   return "unknown";

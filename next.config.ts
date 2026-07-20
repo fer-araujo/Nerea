@@ -15,6 +15,14 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  experimental: {
+    // Defense in depth: the contact form's largest legitimate payload is ~2 KB
+    // (name 80 + email 160 + message 2000 chars). Cap Server Action bodies far
+    // below Next's implicit 1 MB default so an oversized POST is rejected early.
+    serverActions: {
+      bodySizeLimit: "64kb",
+    },
+  },
 };
 
 export default withNextIntl(nextConfig);

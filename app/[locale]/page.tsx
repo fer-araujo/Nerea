@@ -2,16 +2,25 @@ import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { commerce } from "@/lib/commerce";
-import type { Locale, ProductSummary } from "@/lib/commerce/types";
+import type { Locale, MediaItem, ProductSummary } from "@/lib/commerce/types";
 import { routing } from "@/i18n/routing";
 import { Link } from "@/i18n/navigation";
 import { buildPageMetadata } from "@/lib/seo";
 import { Logo } from "@/components/brand/Logo";
 import { ProductCard } from "@/components/product/ProductCard";
+import { MediaFrame } from "@/components/product/MediaFrame";
 import { Reveal, Stagger, StaggerItem } from "@/components/motion/Reveal";
 import { ScrollScene } from "@/components/motion/ScrollScene";
 
 export { generateStaticParams } from "@/i18n/routing";
+
+// Placeholder hero backdrop — swap the `url`/`kind` for the artisan's real
+// photo or short video once it exists; `MediaFrame` renders either kind
+// identically (object-cover, reduced-motion-gated autoplay for video), so
+// no layout change is needed when the real asset lands. `alt: ""` because
+// the backdrop is decorative — the section's own aria-hidden wrapper below
+// is the source of truth for that, this just keeps the two in sync.
+const HERO_MEDIA: MediaItem = { kind: "image", url: "/placeholder-hero.svg", alt: "" };
 
 // Landing is statically generated; featured pieces refresh on the same 60s ISR
 // window as the catalog (design.md — Rendering / Data-Fetching Strategy).
@@ -78,20 +87,29 @@ export default async function LandingPage({
   return (
     <main className="flex-1">
       {/* HERO — the brand opens: the mark as a quiet gallery object beside an
-          editorial statement of the one-of-one / cera-perdida ethos. Type is
-          the hero (no stock photography — real piece photography is a pending
-          client dependency), so the composition leans on the mark, the Fraunces
-          statement, and generous gallery space rather than a filled image.
+          editorial statement of the one-of-one / cera-perdida ethos, over a
+          full-bleed media backdrop (HERO_MEDIA — a placeholder today, the
+          artisan's real photo/video later with zero layout change).
 
           <ScrollScene> enhances THIS SAME markup with the GSAP scroll-scrubbed
           intro (task 3.4) on capable devices with motion allowed; everywhere
           else (reduced motion, low-end, no-JS) it renders untouched as the
           approved static hero. The nodes GSAP drives carry `data-hero-*` and are
           plain DOM — deliberately NOT Framer components — so GSAP and Framer
-          never animate the same element. */}
+          never animate the same element. The media backdrop below is
+          intentionally OUTSIDE that set: ScrollScene's selectors are
+          unchanged, so it stays a static layer under the choreography rather
+          than restructuring what GSAP targets. */}
       <ScrollScene>
-        <section className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-6xl flex-col justify-center px-6 py-12 sm:px-10 sm:py-16">
-          <div className="grid items-center gap-10 lg:grid-cols-[1.3fr_1fr] lg:gap-16">
+        <section className="relative flex min-h-[calc(100dvh-4rem)] w-full flex-col justify-center overflow-hidden px-6 py-12 sm:px-10 sm:py-16">
+          <div aria-hidden="true" className="absolute inset-0 -z-10">
+            <MediaFrame item={HERO_MEDIA} alt="" sizes="100vw" priority />
+            {/* Bone scrim: guarantees the text above stays legible no matter
+                what asset eventually replaces the placeholder. */}
+            <div className="absolute inset-0 bg-gradient-to-t from-bone via-bone/85 to-bone/55" />
+          </div>
+
+          <div className="mx-auto grid w-full max-w-6xl items-center gap-10 lg:grid-cols-[1.3fr_1fr] lg:gap-16">
             <div className="order-2 flex flex-col items-start lg:order-1">
               <h1
                 data-hero-lede

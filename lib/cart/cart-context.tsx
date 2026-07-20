@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { Money } from "@/lib/commerce/types";
+import type { MediaItem, Money } from "@/lib/commerce/types";
 
 // Client-only cart state. There is no server-side cart resource — Stripe
 // Checkout Sessions are one-shot (unlike the dropped Shopify Cart API), so
@@ -22,7 +22,7 @@ export interface CartLineItem {
   handle: string;
   title: string;
   price: Money;
-  image: string;
+  cover: MediaItem | null;
   /** Always 1 — one-of-one pieces never stack. */
   quantity: number;
 }

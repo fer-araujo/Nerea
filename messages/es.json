@@ -42,7 +42,9 @@
     "title": "Tienda",
     "intro": "Piezas únicas, disponibles mientras existan.",
     "emptyTitle": "Todavía no hay piezas en exhibición",
-    "emptyBody": "El taller está preparando la próxima colección — vuelve pronto."
+    "emptyBody": "El taller está preparando la próxima colección — vuelve pronto.",
+    "allCategories": "Todas",
+    "emptyCategoryBody": "Todavía no hay piezas en esta categoría."
   },
   "ProductDetail": {
     "acquireCta": "Adquirir esta pieza",

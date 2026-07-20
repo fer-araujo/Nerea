@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" fill="none" aria-hidden="true">
+  <title>nerea — marcador de posición del banner principal</title>
+  <defs>
+    <radialGradient id="heroGradient" cx="72%" cy="28%" r="80%">
+      <stop offset="0%" stop-color="#FAF6EF" />
+      <stop offset="100%" stop-color="#ECE4D6" />
+    </radialGradient>
+  </defs>
+
+  <rect width="1600" height="900" fill="#F5F0E8" />
+  <rect width="1600" height="900" fill="url(#heroGradient)" />
+
+  <!-- Oversized, cropped echo of the brand mark's crossed-diamond motif —
+       abstract, not a literal piece of jewelry. -->
+  <path d="M800 -140 L1420 450 L800 1040 L180 450 Z" stroke="#A9814E" stroke-width="1.5" opacity="0.22" />
+  <path d="M800 70 L1180 450 L800 830 L420 450 Z" stroke="#6B6259" stroke-width="1" opacity="0.16" />
+
+  <!-- Runway hairlines, echoing the site's own divider token. -->
+  <line x1="0" y1="632" x2="1600" y2="632" stroke="#DDD4C5" stroke-width="1" />
+  <line x1="0" y1="652" x2="1600" y2="600" stroke="#DDD4C5" stroke-width="1" opacity="0.6" />
+
+  <!-- Print-proof style corner registration marks — a universal, wordless
+       "this is a placeholder frame" signal that needs no bilingual copy. -->
+  <g stroke="#6B6259" stroke-width="1.25" opacity="0.55">
+    <path d="M40 40 H92 M40 40 V92" />
+    <path d="M1560 40 H1508 M1560 40 V92" />
+    <path d="M40 860 H92 M40 860 V808" />
+    <path d="M1560 860 H1508 M1560 860 V808" />
+  </g>
+</svg>

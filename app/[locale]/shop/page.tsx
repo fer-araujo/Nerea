@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { commerce } from "@/lib/commerce";
-import type { Locale, ProductSummary } from "@/lib/commerce/types";
+import type { Category, Locale, ProductSummary } from "@/lib/commerce/types";
 import { routing } from "@/i18n/routing";
 import { buildPageMetadata, pageTitle } from "@/lib/seo";
-import { ProductCard } from "@/components/product/ProductCard";
+import { CategoryFilter } from "@/components/shop/CategoryFilter";
 
 export { generateStaticParams } from "@/i18n/routing";
 
@@ -47,6 +47,17 @@ async function getCatalog(locale: Locale): Promise<ProductSummary[]> {
   }
 }
 
+async function getCategoryList(locale: Locale): Promise<Category[]> {
+  try {
+    return await commerce.getCategories(locale);
+  } catch {
+    // Same fail-safe posture as getCatalog above: a categories fetch
+    // failure must never break the shop route — it just degrades to no
+    // filter UI, identical to the legitimate zero-categories case.
+    return [];
+  }
+}
+
 export default async function ShopPage({
   params,
 }: {
@@ -62,7 +73,10 @@ export default async function ShopPage({
   // PENDING ARTISAN REVIEW, same status as `About`/`Contact` (task 5.5
   // content checklist).
   const t = await getTranslations("Shop");
-  const products = await getCatalog(locale);
+  const [products, categories] = await Promise.all([
+    getCatalog(locale),
+    getCategoryList(locale),
+  ]);
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-16 sm:px-10 sm:py-24">
@@ -79,13 +93,7 @@ export default async function ShopPage({
           <span className="mt-2 block">{t("emptyBody")}</span>
         </p>
       ) : (
-        <ul className="grid grid-cols-1 gap-x-8 gap-y-16 sm:grid-cols-2 lg:grid-cols-3">
-          {products.map((product, index) => (
-            <li key={product.handle}>
-              <ProductCard product={product} priority={index < 3} index={index} />
-            </li>
-          ))}
-        </ul>
+        <CategoryFilter products={products} categories={categories} />
       )}
     </main>
   );

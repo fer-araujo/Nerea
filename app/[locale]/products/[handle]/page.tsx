@@ -27,8 +27,17 @@ export async function generateStaticParams({
   const locale = hasLocale(routing.locales, params.locale)
     ? params.locale
     : routing.defaultLocale;
-  const products = await commerce.getProducts(locale);
-  return products.map((product) => ({ handle: product.handle }));
+  try {
+    const products = await commerce.getProducts(locale);
+    return products.map((product) => ({ handle: product.handle }));
+  } catch {
+    // A data-layer failure during the build must never crash static
+    // generation for this route — same fail-safe posture as every other
+    // commerce read call site (shop/page.tsx, page.tsx's getFeatured,
+    // sitemap.ts). Zero pre-rendered handles still builds; Next's default
+    // dynamicParams then serves any real handle on demand afterwards.
+    return [];
+  }
 }
 
 export const revalidate = 60;
@@ -100,7 +109,7 @@ export default async function ProductDetailPage({
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-16 sm:px-10 sm:py-24">
       <div className="grid gap-10 lg:grid-cols-2 lg:gap-16">
-        <ProductGallery images={product.images} alt={product.title} />
+        <ProductGallery media={product.media} alt={product.title} />
 
         <div className="flex flex-col gap-6">
           {/* "Pieza única" is brass (craftsmanship/uniqueness), not jade —
@@ -130,6 +139,7 @@ export default async function ProductDetailPage({
 
           <AvailabilityBadge
             availability={product.availability}
+            specs={product.category ? [product.category.title] : undefined}
             className="border-t border-line pt-4"
           />
 

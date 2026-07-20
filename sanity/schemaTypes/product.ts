@@ -57,11 +57,26 @@ export const product = defineType({
       validation: (rule) => rule.required(),
     }),
     defineField({
-      name: "images",
-      title: "Fotos",
-      description: "La primera foto es la que aparece en el catálogo.",
+      name: "category",
+      title: "Categoría",
+      description: "Categoría de la pieza (opcional).",
+      type: "reference",
+      to: [{ type: "category" }],
+    }),
+    defineField({
+      name: "media",
+      title: "Galería",
+      description:
+        "Fotos y videos de la pieza. El primer elemento es el que aparece en el catálogo.",
       type: "array",
-      of: [{ type: "image", options: { hotspot: true } }],
+      of: [
+        { type: "image", options: { hotspot: true } },
+        {
+          type: "file",
+          title: "Video o GIF",
+          options: { accept: "video/*,image/gif" },
+        },
+      ],
       validation: (rule) => rule.min(1),
     }),
     defineField({
@@ -103,7 +118,7 @@ export const product = defineType({
     }),
   ],
   preview: {
-    select: { title: "title.es", media: "images.0", status: "status" },
+    select: { title: "title.es", media: "media.0", status: "status" },
     prepare({ title, media, status }) {
       return {
         title,

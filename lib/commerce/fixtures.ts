@@ -1,18 +1,26 @@
 import { resolveLocalized, toAvailability, type Localized } from "./transforms";
 import type {
   Availability,
+  Category,
   CommerceReadApi,
   Locale,
+  MediaItem,
   Money,
   Product,
   ProductSummary,
 } from "./types";
 
+interface FixtureCategory {
+  title: Localized;
+  slug: string;
+}
+
 interface FixtureProduct {
   handle: string;
   title: Localized;
   description: Localized;
-  images: string[];
+  media: MediaItem[];
+  category?: FixtureCategory;
   price: Money;
   /**
    * Loosely typed (not `Availability`) on purpose: it mirrors an arbitrary
@@ -22,16 +30,32 @@ interface FixtureProduct {
   status: string;
 }
 
+// One category per fixture, matching each piece's real product type — this
+// also happens to be a useful test bed for the shop's category filter (3
+// chips, one product each) without inventing unrelated demo data.
+const CATEGORY_RINGS: FixtureCategory = {
+  title: { es: "Anillos", en: "Rings" },
+  slug: "anillos",
+};
+const CATEGORY_PENDANTS: FixtureCategory = {
+  title: { es: "Dijes", en: "Pendants" },
+  slug: "dijes",
+};
+const CATEGORY_EARRINGS: FixtureCategory = {
+  title: { es: "Aretes", en: "Earrings" },
+  slug: "aretes",
+};
+
 // Local, credential-free stand-ins for the Sanity-backed catalog so the
-// storefront is demoable (COMMERCE_SOURCE=fixtures, the default) before the
-// artisan's Sanity project has any real products. The shape mirrors the
-// Sanity schema (bilingual {es,en} fields, minor-unit price) so flipping
-// COMMERCE_SOURCE to "sanity" later needs zero downstream changes.
+// storefront is demoable (COMMERCE_SOURCE=fixtures) before/without the
+// artisan's live Sanity project. The shape mirrors the Sanity schema
+// (bilingual {es,en} fields, minor-unit price, media + category) so flipping
+// COMMERCE_SOURCE to "sanity" (the default) needs zero downstream changes.
 //
-// `images: []` is deliberate, not an oversight: real product photography is
-// a pending client dependency (no files exist yet), so pointing at fake
-// `.jpg` paths would just 404 in the demo. An empty array already falls
-// through ProductCard's existing no-image branch (PlaceholderBlock), which
+// `media: []` is deliberate, not an oversight: real product photography/video
+// is a pending client dependency (no files exist yet), so pointing at fake
+// asset paths would just 404 in the demo. An empty array already falls
+// through ProductCard's existing no-media branch (PlaceholderBlock), which
 // cycles a tinted tone per grid position — see components/ui/
 // PlaceholderBlock.tsx — so the catalog still reads as three distinct,
 // tasteful pieces instead of one broken image repeated three times.
@@ -46,7 +70,8 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
       es: "Pieza única labrada a mano en plata .925 mediante fundición a la cera perdida. Cada anillo conserva las marcas irrepetibles del proceso artesanal.",
       en: "One-of-a-kind piece hand-carved in .925 silver using the lost-wax casting technique. Every ring keeps the unrepeatable marks of the handmade process.",
     },
-    images: [],
+    media: [],
+    category: CATEGORY_RINGS,
     price: { amount: 185000, currency: "MXN" }, // $1,850.00 MXN
     status: "available",
   },
@@ -60,7 +85,8 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
       es: "Dije en oro de 14k engastado a mano con una amatista natural. Pieza única, ya vendida.",
       en: "14k gold pendant hand-set with a natural amethyst. One-of-a-kind piece, already sold.",
     },
-    images: [],
+    media: [],
+    category: CATEGORY_PENDANTS,
     price: { amount: 420000, currency: "MXN" }, // $4,200.00 MXN
     status: "sold",
   },
@@ -79,7 +105,8 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
     description: {
       es: "Aretes colgantes de plata .925 inspirados en las fases de la luna, terminados a mano con textura martillada.",
     },
-    images: [],
+    media: [],
+    category: CATEGORY_EARRINGS,
     price: { amount: 95000, currency: "MXN" }, // $950.00 MXN
     status: "available",
   },
@@ -95,7 +122,8 @@ function toSummary(product: FixtureProduct, locale: Locale): ProductSummary {
     title: resolveLocalized(product.title, locale),
     price: product.price,
     availability: toAvailability(product.status),
-    image: product.images[0] ?? "",
+    cover: product.media[0] ?? null,
+    categorySlug: product.category?.slug,
   };
 }
 
@@ -103,7 +131,13 @@ function toProduct(product: FixtureProduct, locale: Locale): Product {
   return {
     ...toSummary(product, locale),
     description: resolveLocalized(product.description, locale),
-    images: product.images,
+    media: product.media,
+    category: product.category
+      ? {
+          title: resolveLocalized(product.category.title, locale),
+          slug: product.category.slug,
+        }
+      : undefined,
   };
 }
 
@@ -127,5 +161,23 @@ export const fixturesApi: CommerceReadApi = {
       result[handle] = product ? toAvailability(product.status) : "sold";
     }
     return result;
+  },
+
+  async getCategories(locale) {
+    // Derived from the fixtures themselves (de-duplicated by slug) rather
+    // than a separate hardcoded list, so this can never drift out of sync
+    // with what the fixture products actually reference.
+    const seen = new Map<string, FixtureCategory>();
+    for (const product of FIXTURE_PRODUCTS) {
+      if (product.category && !seen.has(product.category.slug)) {
+        seen.set(product.category.slug, product.category);
+      }
+    }
+    return Array.from(seen.values()).map(
+      (category): Category => ({
+        title: resolveLocalized(category.title, locale),
+        slug: category.slug,
+      }),
+    );
   },
 };

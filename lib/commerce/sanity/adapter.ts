@@ -1,13 +1,22 @@
 import { toAvailability, toMoney } from "../transforms";
 import type {
   Availability,
+  Category,
   CommerceReadApi,
+  MediaItem,
   Product,
   ProductSummary,
 } from "../types";
-import { PRODUCTS_REVALIDATE_SECONDS, PRODUCTS_TAG, sanityClient } from "./client";
+import {
+  CATEGORIES_REVALIDATE_SECONDS,
+  CATEGORIES_TAG,
+  PRODUCTS_REVALIDATE_SECONDS,
+  PRODUCTS_TAG,
+  sanityClient,
+} from "./client";
 import {
   AVAILABILITY_BY_HANDLES_QUERY,
+  CATEGORIES_QUERY,
   PRODUCT_BY_HANDLE_QUERY,
   PRODUCTS_LIST_QUERY,
 } from "./queries";
@@ -17,12 +26,23 @@ interface RawMoney {
   currency: string;
 }
 
+interface RawMediaItem {
+  kind: "image" | "video";
+  url: string | null;
+}
+
+interface RawCategory {
+  title: string;
+  slug: string;
+}
+
 interface RawProductSummary {
   handle: string;
   title: string;
   price: RawMoney;
   status: string;
-  image: string | null;
+  cover: RawMediaItem | null;
+  categorySlug: string | null;
 }
 
 interface RawProduct {
@@ -31,7 +51,8 @@ interface RawProduct {
   description: string;
   price: RawMoney;
   status: string;
-  images: (string | null)[];
+  media: (RawMediaItem | null)[];
+  category: RawCategory | null;
 }
 
 interface RawAvailability {
@@ -42,10 +63,38 @@ interface RawAvailability {
 // ISR-tagged fetch: 60s keeps a just-sold piece from lingering without
 // per-request latency; a Sanity webhook -> revalidateTag("products") is the
 // stretch upgrade for instant reflection (see design.md).
-function fetchOptions() {
+function productsFetchOptions() {
   return {
     next: { revalidate: PRODUCTS_REVALIDATE_SECONDS, tags: [PRODUCTS_TAG] },
   };
+}
+
+function categoriesFetchOptions() {
+  return {
+    next: {
+      revalidate: CATEGORIES_REVALIDATE_SECONDS,
+      tags: [CATEGORIES_TAG],
+    },
+  };
+}
+
+// A media item with no resolved asset URL (a dangling/broken reference) is
+// dropped rather than surfaced — the UI's "no media" fallback
+// (PlaceholderBlock) is a better outcome than an <img>/<video> pointed at
+// `null`.
+function toMediaItem(raw: RawMediaItem | null | undefined): MediaItem | null {
+  if (!raw?.url) return null;
+  return { kind: raw.kind, url: raw.url };
+}
+
+function toMediaList(raw: (RawMediaItem | null)[]): MediaItem[] {
+  return raw
+    .map((item) => toMediaItem(item))
+    .filter((item): item is MediaItem => item !== null);
+}
+
+function toCategory(raw: RawCategory | null): Category | undefined {
+  return raw ? { title: raw.title, slug: raw.slug } : undefined;
 }
 
 function toProductSummary(raw: RawProductSummary): ProductSummary {
@@ -54,20 +103,22 @@ function toProductSummary(raw: RawProductSummary): ProductSummary {
     title: raw.title,
     price: toMoney(raw.price),
     availability: toAvailability(raw.status),
-    image: raw.image ?? "",
+    cover: toMediaItem(raw.cover),
+    categorySlug: raw.categorySlug ?? undefined,
   };
 }
 
 function toProduct(raw: RawProduct): Product {
-  const images = raw.images.filter((url): url is string => Boolean(url));
+  const media = toMediaList(raw.media);
   return {
     handle: raw.handle,
     title: raw.title,
     description: raw.description,
     price: toMoney(raw.price),
     availability: toAvailability(raw.status),
-    image: images[0] ?? "",
-    images,
+    cover: media[0] ?? null,
+    media,
+    category: toCategory(raw.category),
   };
 }
 
@@ -81,7 +132,7 @@ export const sanityApi: CommerceReadApi = {
     const products = await sanityClient.fetch<RawProductSummary[]>(
       PRODUCTS_LIST_QUERY,
       { locale },
-      fetchOptions(),
+      productsFetchOptions(),
     );
     return products.map(toProductSummary);
   },
@@ -90,7 +141,7 @@ export const sanityApi: CommerceReadApi = {
     const product = await sanityClient.fetch<RawProduct | null>(
       PRODUCT_BY_HANDLE_QUERY,
       { handle, locale },
-      fetchOptions(),
+      productsFetchOptions(),
     );
     return product ? toProduct(product) : null;
   },
@@ -104,7 +155,7 @@ export const sanityApi: CommerceReadApi = {
     const found = await sanityClient.fetch<RawAvailability[]>(
       AVAILABILITY_BY_HANDLES_QUERY,
       { handles },
-      fetchOptions(),
+      productsFetchOptions(),
     );
 
     for (const handle of handles) {
@@ -114,5 +165,17 @@ export const sanityApi: CommerceReadApi = {
       result[handle] = match ? toAvailability(match.status) : "sold";
     }
     return result;
+  },
+
+  async getCategories(locale) {
+    const categories = await sanityClient.fetch<RawCategory[]>(
+      CATEGORIES_QUERY,
+      { locale },
+      categoriesFetchOptions(),
+    );
+    return categories.map((category) => ({
+      title: category.title,
+      slug: category.slug,
+    }));
   },
 };

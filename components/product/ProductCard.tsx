@@ -1,9 +1,9 @@
-import Image from "next/image";
 import type { ProductSummary } from "@/lib/commerce/types";
 import { Link } from "@/i18n/navigation";
 import { cn } from "@/lib/cn";
 import { Price } from "@/components/ui/Price";
 import { PlaceholderBlock } from "@/components/ui/PlaceholderBlock";
+import { MediaFrame } from "@/components/product/MediaFrame";
 import { AvailabilityBadge } from "@/components/product/AvailabilityBadge";
 
 interface ProductCardProps {
@@ -18,7 +18,10 @@ interface ProductCardProps {
 // Presentational catalog card. Layout is the MCM synthesis: a tall image well,
 // then the mono spec-plate as a strong horizontal datum under a hairline, then
 // the piece name (Fraunces) paired with its price (mono). Purely prop-driven —
-// pages fetch and pass the view model.
+// pages fetch and pass the view model. Stays a Server Component: MediaFrame
+// (the only piece that needs the reduced-motion hook, for video covers) is
+// its own "use client" leaf, so this card never pays a hydration cost of its
+// own.
 export function ProductCard({ product, priority, index, className }: ProductCardProps) {
   const isSold = product.availability === "sold";
 
@@ -26,15 +29,14 @@ export function ProductCard({ product, priority, index, className }: ProductCard
     <article className={cn("group", className)}>
       <Link href={`/products/${product.handle}`} className="block">
         <div className="relative aspect-[4/5] overflow-hidden bg-bone-sunk">
-          {product.image ? (
-            <Image
-              src={product.image}
+          {product.cover ? (
+            <MediaFrame
+              item={product.cover}
               alt={product.title}
-              fill
-              sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
               priority={priority}
+              sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
               className={cn(
-                "object-cover transition-transform duration-700 ease-out",
+                "transition-transform duration-700 ease-out",
                 "group-hover:scale-[1.03] group-focus-visible:scale-[1.03]",
                 isSold && "opacity-80 grayscale-[0.2]",
               )}

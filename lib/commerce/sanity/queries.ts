@@ -6,6 +6,17 @@
 // know about the {es,en} shape. `price` is projected explicitly (not as the
 // bare `price` object) so the response shape always matches the domain
 // `Money` fields regardless of any Sanity-internal object metadata.
+//
+// `media` array members are either `image` or `file` documents (see
+// sanity/schemaTypes/product.ts) — `select(_type == "image" => "image",
+// "video")` discriminates which one each item is so lib/commerce/sanity/
+// adapter.ts can resolve it to a domain `MediaItem` without knowing about
+// Sanity's internal `_type` values.
+
+const MEDIA_ITEM_PROJECTION = `{
+  "kind": select(_type == "image" => "image", "video"),
+  "url": asset->url
+}`;
 
 export const PRODUCTS_LIST_QUERY = `
 *[_type == "product"] | order(_createdAt desc) {
@@ -13,7 +24,8 @@ export const PRODUCTS_LIST_QUERY = `
   "title": coalesce(title[$locale], title.es),
   "price": { "amount": price.amount, "currency": price.currency },
   status,
-  "image": images[0].asset->url
+  "cover": media[0]${MEDIA_ITEM_PROJECTION},
+  "categorySlug": category->slug.current
 }
 `;
 
@@ -24,7 +36,11 @@ export const PRODUCT_BY_HANDLE_QUERY = `
   "description": coalesce(description[$locale], description.es),
   "price": { "amount": price.amount, "currency": price.currency },
   status,
-  "images": images[].asset->url
+  "media": media[]${MEDIA_ITEM_PROJECTION},
+  "category": category->{
+    "title": coalesce(title[$locale], title.es),
+    "slug": slug.current
+  }
 }
 `;
 
@@ -32,5 +48,12 @@ export const AVAILABILITY_BY_HANDLES_QUERY = `
 *[_type == "product" && slug.current in $handles] {
   "handle": slug.current,
   status
+}
+`;
+
+export const CATEGORIES_QUERY = `
+*[_type == "category"] | order(title.es asc) {
+  "title": coalesce(title[$locale], title.es),
+  "slug": slug.current
 }
 `;

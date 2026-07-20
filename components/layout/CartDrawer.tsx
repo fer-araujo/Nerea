@@ -136,14 +136,28 @@ export function CartDrawer() {
                 {items.map((item) => (
                   <li key={item.handle} className="flex gap-4 py-5">
                     <div className="relative size-20 shrink-0 overflow-hidden bg-bone-sunk">
-                      {item.image ? (
-                        <Image
-                          src={item.image}
-                          alt={item.title}
-                          fill
-                          sizes="80px"
-                          className="object-cover"
-                        />
+                      {item.cover ? (
+                        item.cover.kind === "image" ? (
+                          <Image
+                            src={item.cover.url}
+                            alt={item.title}
+                            fill
+                            sizes="80px"
+                            className="object-cover"
+                          />
+                        ) : (
+                          // Static preview only, like ProductGallery's
+                          // thumbnails — a tiny 80px line item is not the
+                          // place for an autoplaying clip.
+                          <video
+                            src={item.cover.url}
+                            muted
+                            playsInline
+                            preload="metadata"
+                            aria-hidden="true"
+                            className="absolute inset-0 h-full w-full object-cover"
+                          />
+                        )
                       ) : (
                         <PlaceholderBlock className="absolute inset-0" />
                       )}

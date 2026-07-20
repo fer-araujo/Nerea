@@ -23,14 +23,14 @@ const ITEM_A: Omit<CartLineItem, "quantity"> = {
   handle: "anillo-plata-cera-perdida",
   title: "Anillo de plata fundido a la cera perdida",
   price: { amount: 185000, currency: "MXN" },
-  image: "",
+  cover: null,
 };
 
 const ITEM_B: Omit<CartLineItem, "quantity"> = {
   handle: "aretes-plata-luna",
   title: 'Aretes de plata "fase lunar"',
   price: { amount: 95000, currency: "MXN" },
-  image: "",
+  cover: null,
 };
 
 // Stand-in for AcquireButton/CartTrigger — exercises the same `useCart()`

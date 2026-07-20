@@ -42,7 +42,9 @@
     "title": "Shop",
     "intro": "One-of-a-kind pieces, available while they last.",
     "emptyTitle": "No pieces on display yet",
-    "emptyBody": "The atelier is preparing the next collection — check back soon."
+    "emptyBody": "The atelier is preparing the next collection — check back soon.",
+    "allCategories": "All",
+    "emptyCategoryBody": "No pieces in this category yet."
   },
   "ProductDetail": {
     "acquireCta": "Acquire this piece",

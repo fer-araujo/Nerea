@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 
 interface AcquireButtonProps {
   label: string;
-  product: Pick<ProductSummary, "handle" | "title" | "price" | "image">;
+  product: Pick<ProductSummary, "handle" | "title" | "price" | "cover">;
   className?: string;
 }
 

@@ -38,7 +38,7 @@ const LINE: CartLineItem = {
   handle: "anillo-plata-cera-perdida",
   title: "Anillo de plata fundido a la cera perdida",
   price: { amount: 185000, currency: "MXN" },
-  image: "",
+  cover: null,
   quantity: 1,
 };
 

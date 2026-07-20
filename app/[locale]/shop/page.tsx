@@ -1,13 +1,35 @@
+import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { commerce } from "@/lib/commerce";
 import type { Locale, ProductSummary } from "@/lib/commerce/types";
 import { routing } from "@/i18n/routing";
+import { buildPageMetadata, pageTitle } from "@/lib/seo";
 import { ProductCard } from "@/components/product/ProductCard";
 
 export { generateStaticParams } from "@/i18n/routing";
 
 export const revalidate = 60;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale: rawLocale } = await params;
+  const locale = hasLocale(routing.locales, rawLocale)
+    ? rawLocale
+    : routing.defaultLocale;
+  const t = await getTranslations({ locale, namespace: "Meta" });
+
+  return buildPageMetadata({
+    locale,
+    pathname: "/shop",
+    title: pageTitle(t("shop.title")),
+    description: t("shop.description"),
+    ogImageAlt: t("ogImageAlt"),
+  });
+}
 
 async function getCatalog(locale: Locale): Promise<ProductSummary[]> {
   try {
@@ -36,6 +58,9 @@ export default async function ShopPage({
     : routing.defaultLocale;
   setRequestLocale(locale);
 
+  // `Shop` copy (title/intro/empty-state) is assistant-drafted — DRAFT
+  // PENDING ARTISAN REVIEW, same status as `About`/`Contact` (task 5.5
+  // content checklist).
   const t = await getTranslations("Shop");
   const products = await getCatalog(locale);
 

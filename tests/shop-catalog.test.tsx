@@ -11,9 +11,14 @@ import esMessages from "../messages/es.json";
 vi.mock("next-intl/server", () => ({
   setRequestLocale: () => {},
   getTranslations: async (namespace: string) => {
-    const scoped = (esMessages as Record<string, Record<string, string>>)[
-      namespace
-    ];
+    // `as unknown as` because `Meta` (task 5.1) is the first nested
+    // namespace (e.g. `Meta.home.title`) — every namespace this mock is
+    // actually exercised against (`Shop`) is still a flat Record<string,
+    // string>, so the direct cast is no longer a sound structural overlap
+    // for the whole messages tree.
+    const scoped = (
+      esMessages as unknown as Record<string, Record<string, string>>
+    )[namespace];
     return (key: string) => scoped[key];
   },
 }));

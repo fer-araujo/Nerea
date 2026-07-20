@@ -3,6 +3,7 @@ import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { commerce } from "@/lib/commerce";
 import type { Locale, MediaItem, ProductSummary } from "@/lib/commerce/types";
+import { getSiteSettings } from "@/lib/site-settings/adapter";
 import { routing } from "@/i18n/routing";
 import { Link } from "@/i18n/navigation";
 import { buildPageMetadata } from "@/lib/seo";
@@ -14,13 +15,19 @@ import { ScrollScene } from "@/components/motion/ScrollScene";
 
 export { generateStaticParams } from "@/i18n/routing";
 
-// Placeholder hero backdrop — swap the `url`/`kind` for the artisan's real
-// photo or short video once it exists; `MediaFrame` renders either kind
-// identically (object-cover, reduced-motion-gated autoplay for video), so
-// no layout change is needed when the real asset lands. `alt: ""` because
-// the backdrop is decorative — the section's own aria-hidden wrapper below
-// is the source of truth for that, this just keeps the two in sync.
-const HERO_MEDIA: MediaItem = { kind: "image", url: "/placeholder-hero.svg", alt: "" };
+// Fallback hero backdrop, used until the artisan uploads a real photo/video
+// via Studio's "Ajustes del sitio" singleton (siteSettings.heroMedia) —
+// getSiteSettings degrades to `hero: null` whenever that field is empty, so
+// this constant is the true zero-state default, not a placeholder pending
+// deletion. `MediaFrame` renders either kind identically (object-cover,
+// reduced-motion-gated autoplay for video), so no layout change is needed
+// once a real asset is uploaded. `alt: ""` because the backdrop is
+// decorative by default — see the `heroIsDecorative` toggle below.
+const FALLBACK_HERO_MEDIA: MediaItem = {
+  kind: "image",
+  url: "/placeholder-hero.svg",
+  alt: "",
+};
 
 // Landing is statically generated; featured pieces refresh on the same 60s ISR
 // window as the catalog (design.md — Rendering / Data-Fetching Strategy).
@@ -75,7 +82,24 @@ export default async function LandingPage({
   // content checklist; spec: brand-pages — Draft Content Marking applies to
   // brand-voice copy generally, not only the About/Contact pages).
   const t = await getTranslations("Home");
-  const featured = await getFeatured(locale);
+  const [featured, settings] = await Promise.all([
+    getFeatured(locale),
+    getSiteSettings(locale),
+  ]);
+
+  const heroMedia: MediaItem = settings.hero
+    ? {
+        kind: settings.hero.kind,
+        url: settings.hero.url,
+        alt: settings.heroAlt ?? undefined,
+      }
+    : FALLBACK_HERO_MEDIA;
+  // A real `heroAlt` means the artisan authored an accessible description —
+  // surface it for real and take the backdrop out of aria-hidden. With no
+  // authored description (including the default fallback), the backdrop
+  // stays fully decorative: the headline/body copy already carries the
+  // meaningful content in text form.
+  const heroIsDecorative = !heroMedia.alt;
 
   const specs = [
     { label: t("specMaterialLabel"), value: t("specMaterialValue") },
@@ -88,8 +112,9 @@ export default async function LandingPage({
     <main className="flex-1">
       {/* HERO — the brand opens: the mark as a quiet gallery object beside an
           editorial statement of the one-of-one / cera-perdida ethos, over a
-          full-bleed media backdrop (HERO_MEDIA — a placeholder today, the
-          artisan's real photo/video later with zero layout change).
+          full-bleed media backdrop (settings-driven: the artisan's uploaded
+          photo/video when set via Studio, else FALLBACK_HERO_MEDIA — zero
+          layout change either way).
 
           <ScrollScene> enhances THIS SAME markup with the GSAP scroll-scrubbed
           intro (task 3.4) on capable devices with motion allowed; everywhere
@@ -102,10 +127,13 @@ export default async function LandingPage({
           than restructuring what GSAP targets. */}
       <ScrollScene>
         <section className="relative flex min-h-[calc(100dvh-4rem)] w-full flex-col justify-center overflow-hidden px-6 py-12 sm:px-10 sm:py-16">
-          <div aria-hidden="true" className="absolute inset-0 -z-10">
-            <MediaFrame item={HERO_MEDIA} alt="" sizes="100vw" priority />
+          <div
+            aria-hidden={heroIsDecorative ? true : undefined}
+            className="absolute inset-0 -z-10"
+          >
+            <MediaFrame item={heroMedia} alt={heroMedia.alt ?? ""} sizes="100vw" priority />
             {/* Bone scrim: guarantees the text above stays legible no matter
-                what asset eventually replaces the placeholder. */}
+                what asset the artisan uploads. */}
             <div className="absolute inset-0 bg-gradient-to-t from-bone via-bone/85 to-bone/55" />
           </div>
 

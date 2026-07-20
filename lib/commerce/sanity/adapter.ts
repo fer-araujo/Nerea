@@ -26,7 +26,10 @@ interface RawMoney {
   currency: string;
 }
 
-interface RawMediaItem {
+// Exported so lib/site-settings/adapter.ts can reuse the exact same raw
+// shape and resolution logic (toMediaItem below) for siteSettings' `logo`/
+// `heroMedia[0]`, instead of a second, possibly-drifting implementation.
+export interface RawMediaItem {
   kind: "image" | "video";
   url: string | null;
 }
@@ -82,7 +85,7 @@ function categoriesFetchOptions() {
 // dropped rather than surfaced — the UI's "no media" fallback
 // (PlaceholderBlock) is a better outcome than an <img>/<video> pointed at
 // `null`.
-function toMediaItem(raw: RawMediaItem | null | undefined): MediaItem | null {
+export function toMediaItem(raw: RawMediaItem | null | undefined): MediaItem | null {
   if (!raw?.url) return null;
   return { kind: raw.kind, url: raw.url };
 }

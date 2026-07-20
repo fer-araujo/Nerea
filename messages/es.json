@@ -102,8 +102,12 @@
     "messageLabel": "Mensaje",
     "messagePlaceholder": "Cuéntanos sobre la pieza que buscas…",
     "submit": "Enviar mensaje",
+    "submitting": "Enviando…",
     "successTitle": "Mensaje recibido",
-    "successBody": "Gracias por escribir — la artesana te responderá personalmente en cuanto pueda."
+    "successBody": "Gracias por escribir — la artesana te responderá personalmente en cuanto pueda.",
+    "errorValidation": "Revisa tus datos e intenta de nuevo.",
+    "errorRateLimit": "Has enviado varios mensajes seguidos. Espera un momento y vuelve a intentar.",
+    "errorServer": "No se pudo enviar el mensaje. Intenta de nuevo en unos minutos."
   },
   "Meta": {
     "ogImageAlt": "nerea — taller de joyería de autor, piezas únicas hechas a mano",

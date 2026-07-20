@@ -29,11 +29,12 @@ export async function generateMetadata({
 
 // Fully static shell (design.md: "/contact" is SSG, no catalog data); only
 // the form itself is a client island (ContactForm) so submit can be
-// intercepted without a page reload/navigation. No email/API integration in
-// MVP scope (see ContactForm's own comment for why a mailto fallback was
-// rejected too). Content (the `Contact` namespace) is assistant-drafted and
-// DRAFT PENDING ARTISAN REVIEW (spec: brand-pages — Draft Content Marking) —
-// see openspec/changes/mvp-launch/tasks.md 4.13.
+// intercepted without a page reload/navigation. Submissions are stored as
+// Sanity `contactMessage` documents via the submitContact Server Action
+// (lib/contact/submit.ts) — see ContactForm's own comment for why a mailto
+// fallback was rejected instead. Content (the `Contact` namespace) is
+// assistant-drafted and DRAFT PENDING ARTISAN REVIEW (spec: brand-pages —
+// Draft Content Marking) — see openspec/changes/mvp-launch/tasks.md 4.13.
 export default async function ContactPage({
   params,
 }: {

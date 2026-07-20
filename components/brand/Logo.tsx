@@ -1,15 +1,17 @@
 import { cn } from "@/lib/cn";
 
 /**
- * PLACEHOLDER brand logo.
+ * Brand logo, with an artisan-uploadable override.
  *
- * The artisan's real vector logo is not available yet — the only reference is a
- * low-resolution raster of her mark. `Mark` below is a hand-approximated SVG of
- * that mark (a scalloped crest/crown over a crossed base), NOT a faithful trace;
- * the "nerea" wordmark is set in the brand serif (Fraunces) and is faithful.
- * When the real vector arrives, replace ONLY this file: everything else consumes
- * <Logo /> and needs no change. Mark and wordmark inherit `currentColor`, so
- * they work on both the light bone canvas and the rare dark obsidian sections.
+ * `src` (siteSettings.logo, see lib/site-settings) takes priority when set —
+ * Studio's "Ajustes del sitio" singleton lets the artisan upload her real
+ * logo without a code change. Until then, this file's coded placeholder is
+ * the fallback: `Mark` is a hand-approximated SVG of her mark (a scalloped
+ * crest/crown over a crossed base), NOT a faithful trace, and the "nerea"
+ * wordmark is set in the brand serif (Fraunces) and is faithful. Mark and
+ * wordmark inherit `currentColor`, so they work on both the light bone
+ * canvas and the rare dark obsidian sections; an uploaded `src` sizes the
+ * same way but does not recolor (it renders whatever the artisan uploaded).
  */
 
 type LogoVariant = "lockup" | "wordmark" | "mark";
@@ -19,6 +21,19 @@ type LogoProps = {
   className?: string;
   /** Accessible name for the whole logo. Defaults to the brand name. */
   label?: string;
+  /**
+   * Resolved URL of an artisan-uploaded logo. When present, it fully
+   * replaces the placeholder mark+wordmark below, regardless of `variant` —
+   * a single uploaded asset is assumed to be the artisan's complete lockup,
+   * not a mark-only crop that code should try to split.
+   *
+   * SECURITY: rendered ONLY via a plain `<img>` — never inlined as SVG
+   * markup, never `dangerouslySetInnerHTML`. An `<img src>` cannot execute a
+   * `<script>` embedded in an SVG file the way an inline `<svg>`/innerHTML
+   * render can, so this stays safe even though the upload accepts
+   * `image/svg+xml`.
+   */
+  src?: string;
 };
 
 function Mark({ className }: { className?: string }) {
@@ -52,7 +67,23 @@ function Wordmark({ className }: { className?: string }) {
   );
 }
 
-export function Logo({ variant = "lockup", className, label = "nerea" }: LogoProps) {
+export function Logo({ variant = "lockup", className, label = "nerea", src }: LogoProps) {
+  if (src) {
+    return (
+      <span
+        role="img"
+        aria-label={label}
+        className={cn("inline-flex items-center", className)}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- uploaded brand
+            asset, arbitrary aspect ratio/format (incl. SVG); sized via
+            em-relative classes that don't fit next/image's width+height/fill
+            contract. See the SECURITY note on LogoProps.src above. */}
+        <img src={src} alt="" className="h-[1.2em] w-auto object-contain" />
+      </span>
+    );
+  }
+
   if (variant === "mark") {
     return (
       <span role="img" aria-label={label} className={cn("inline-flex", className)}>

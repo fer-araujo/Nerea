@@ -1,6 +1,8 @@
 import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Logo } from "@/components/brand/Logo";
+import { getSiteSettings } from "@/lib/site-settings/adapter";
+import type { Locale } from "@/lib/commerce/types";
 import { LocaleSwitcher } from "./LocaleSwitcher";
 import { CartTrigger } from "./CartTrigger";
 
@@ -11,6 +13,10 @@ import { CartTrigger } from "./CartTrigger";
 // safe); only the ES/EN toggle is a client island.
 export async function Header({ locale }: { locale: string }) {
   const t = await getTranslations({ locale, namespace: "Nav" });
+  // Safe: this component only ever renders under app/[locale]/layout.tsx
+  // with a locale already validated against routing.locales — same
+  // assumption CartDrawer.tsx documents for its own useLocale() cast.
+  const settings = await getSiteSettings(locale as Locale);
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bone/85 backdrop-blur-md">
@@ -19,7 +25,7 @@ export async function Header({ locale }: { locale: string }) {
           href="/"
           className="text-ink transition-colors hover:text-brass-deep"
         >
-          <Logo variant="lockup" className="text-xl" />
+          <Logo variant="lockup" className="text-xl" src={settings.logo?.url} />
         </Link>
 
         <nav

@@ -13,7 +13,10 @@
 // adapter.ts can resolve it to a domain `MediaItem` without knowing about
 // Sanity's internal `_type` values.
 
-const MEDIA_ITEM_PROJECTION = `{
+// Exported so lib/site-settings/queries.ts can project siteSettings' `logo`/
+// `heroMedia[0]` through the exact same image-vs-file/video discrimination —
+// one definition, never two GROQ snippets that could drift apart.
+export const MEDIA_ITEM_PROJECTION = `{
   "kind": select(_type == "image" => "image", "video"),
   "url": asset->url
 }`;

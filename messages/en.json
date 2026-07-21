@@ -102,8 +102,12 @@
     "messageLabel": "Message",
     "messagePlaceholder": "Tell us about the piece you're looking for…",
     "submit": "Send message",
+    "submitting": "Sending…",
     "successTitle": "Message received",
-    "successBody": "Thank you for writing — the artisan will reply personally as soon as she can."
+    "successBody": "Thank you for writing — the artisan will reply personally as soon as she can.",
+    "errorValidation": "Please check your details and try again.",
+    "errorRateLimit": "You've sent several messages in a row. Wait a moment and try again.",
+    "errorServer": "Your message couldn't be sent. Please try again in a few minutes."
   },
   "Meta": {
     "ogImageAlt": "nerea — author jewelry atelier, one-of-a-kind handmade pieces",

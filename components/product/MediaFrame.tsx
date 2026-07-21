@@ -30,11 +30,12 @@ export function MediaFrame({ item, alt, sizes, priority, className }: MediaFrame
       // is enabled in next.config.ts — a flag this project deliberately does
       // not set (see components/ui/PlaceholderBlock.tsx's own "no
       // next/image SVG-optimization opt-in" precedent). A plain <img>
-      // sidesteps the optimizer entirely. Safe to special-case here: SVG
-      // media only ever comes from local, developer-authored placeholder
-      // assets in public/ (e.g. the hero banner), never from an untrusted
-      // upload — Sanity's `media` field only accepts `image`/`file` assets,
-      // and real product/hero photography is raster, not SVG.
+      // sidesteps the optimizer entirely. This branch is safe regardless of
+      // the source (local placeholder asset in public/, or an artisan's
+      // Sanity Studio upload via siteSettings.heroMedia — see
+      // lib/site-settings): an <img src> cannot execute a <script> embedded
+      // in an SVG file the way an inline <svg>/dangerouslySetInnerHTML
+      // render can, so this is not an XSS vector even for untrusted SVG.
       return (
         // eslint-disable-next-line @next/next/no-img-element -- local placeholder SVG only, see comment above
         <img

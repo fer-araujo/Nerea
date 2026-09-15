@@ -1,5 +1,10 @@
 import { getStripeClient } from "./client";
 
+// SECURITY: every field here MUST be resolved server-side from
+// `commerce.getProductByHandle` (see lib/cart/checkout.ts's `checkoutAction`,
+// the only caller). This module has no way to verify where a value came
+// from — the trust boundary is enforced procedurally by the caller, not by
+// this type. Never build this from a client-supplied cart line directly.
 export interface CheckoutLineInput {
   /** Displayed as the Stripe line item's product name. */
   name: string;

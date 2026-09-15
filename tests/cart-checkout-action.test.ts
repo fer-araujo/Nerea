@@ -78,6 +78,9 @@ describe("checkoutAction — all available", () => {
         // localhost, so resolveOrigin()'s fallback correctly picks "https".
         successUrl: "https://nerea-test.example/es/checkout/success",
         cancelUrl: "https://nerea-test.example/es/shop",
+        // Forwarded so the Stripe webhook can map the payment back to
+        // Sanity docs (app/api/stripe/webhook/route.ts).
+        handles: [LINE.handle],
       },
     );
     expect(redirectMock).toHaveBeenCalledWith(

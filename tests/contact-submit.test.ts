@@ -13,7 +13,7 @@ vi.mock("@/lib/contact/rate-limit", () => ({
   isRateLimited: (...args: unknown[]) => isRateLimitedMock(...args),
 }));
 
-vi.mock("@/lib/contact/write-client", () => ({
+vi.mock("@/lib/sanity/write-client", () => ({
   getSanityWriteClient: () => getSanityWriteClientMock(),
 }));
 

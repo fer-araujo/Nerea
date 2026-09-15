@@ -74,6 +74,9 @@ export async function checkoutAction(
       {
         successUrl: `${origin}${getPathname({ href: "/checkout/success", locale })}`,
         cancelUrl: `${origin}${getPathname({ href: "/shop", locale })}`,
+        // Lets the Stripe webhook (app/api/stripe/webhook/route.ts) map the
+        // completed payment back to these Sanity product documents.
+        handles: lines.map((line) => line.handle),
       },
     );
   } catch {

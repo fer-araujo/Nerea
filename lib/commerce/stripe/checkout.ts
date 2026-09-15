@@ -11,6 +11,18 @@ export interface CheckoutLineInput {
 export interface CreateCheckoutSessionOptions {
   successUrl: string;
   cancelUrl: string;
+  /**
+   * Purchased product handles, attached to the created Checkout Session as
+   * `metadata.handles` (comma-joined) so the Stripe webhook
+   * (app/api/stripe/webhook/route.ts) can map a completed payment back to
+   * the Sanity product documents to mark sold — Stripe never otherwise
+   * tells a webhook which of our domain products a session paid for.
+   * Optional and purely additive: omitting it (as
+   * tests/stripe-checkout.test.ts's direct unit tests do) leaves the
+   * created session's payload byte-for-byte identical to before this field
+   * existed, metadata included.
+   */
+  handles?: string[];
 }
 
 // Builds Stripe line items from the domain cart lines (name / amount-in-
@@ -22,12 +34,22 @@ export interface CreateCheckoutSessionOptions {
 // returning a retryable result instead of letting it escape uncaught.
 export async function createCheckoutSession(
   lines: CheckoutLineInput[],
-  { successUrl, cancelUrl }: CreateCheckoutSessionOptions,
+  { successUrl, cancelUrl, handles }: CreateCheckoutSessionOptions,
 ): Promise<string> {
   const stripe = getStripeClient();
   if (!stripe) {
     throw new Error("Stripe is not configured.");
   }
+
+  // Stripe caps a metadata value at 500 chars. A one-of-one cart is a
+  // handful of short slugs at most, so this is a defensive bound, not an
+  // expected truncation path — and even a truncated/unmatched handle is
+  // safe downstream (lib/commerce/sanity/mark-sold.ts skips handles with no
+  // matching document instead of throwing).
+  const metadata =
+    handles && handles.length > 0
+      ? { handles: handles.join(",").slice(0, 500) }
+      : undefined;
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
@@ -41,6 +63,7 @@ export async function createCheckoutSession(
     })),
     success_url: successUrl,
     cancel_url: cancelUrl,
+    ...(metadata ? { metadata } : {}),
   });
 
   if (!session.url) {

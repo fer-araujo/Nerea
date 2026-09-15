@@ -1,7 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
-import { getSanityWriteClient } from "./write-client";
+import { getSanityWriteClient } from "@/lib/sanity/write-client";
 import { isRateLimited } from "./rate-limit";
 import { validateContactInput } from "./validate";
 

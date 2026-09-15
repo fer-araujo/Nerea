@@ -29,7 +29,8 @@ sandbox blocks writing any `.env*` file outright; rename it locally to
 | `NEXT_PUBLIC_SITE_URL` | public | Used for `metadataBase`, canonical/hreflang URLs, and the sitemap/robots routes; falls back to `http://localhost:3000` when unset. |
 | `STRIPE_SECRET_KEY` | server-only | Stripe test-mode key for Checkout Sessions; never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the key) when unset. |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | public | Stripe publishable key. |
-| `SANITY_WRITE_TOKEN` | server-only | Write-capable token the contact form uses to store `contactMessage` documents; never prefix `NEXT_PUBLIC_`. The app fails safe (returns a generic error, never throws, never logs the token) when unset. |
+| `STRIPE_WEBHOOK_SECRET` | server-only | Signing secret for the `checkout.session.completed` webhook (`app/api/stripe/webhook/route.ts`) that marks a purchased piece sold; never prefix `NEXT_PUBLIC_`. Unset or invalid signatures fail closed (400, nothing processed). |
+| `SANITY_WRITE_TOKEN` | server-only | Write-capable token shared by the contact form (`contactMessage` documents) and the Stripe webhook (marking a piece `sold`); never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the token) when unset. |
 
 `COMMERCE_SOURCE=fixtures` is a dev/test-only override: it swaps in 3 local,
 credential-free sample products (`lib/commerce/fixtures.ts`) so the app runs

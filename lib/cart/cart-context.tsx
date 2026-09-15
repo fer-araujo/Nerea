@@ -20,10 +20,27 @@ import type { MediaItem, Money } from "@/lib/commerce/types";
 // re-opening the drawer).
 export interface CartLineItem {
   handle: string;
+  /**
+   * Display-only. `checkoutAction` (lib/cart/checkout.ts) never reads this —
+   * the Stripe line item's name is re-fetched from the authoritative
+   * catalog by `handle` instead, so a tampered value here can't reach
+   * Stripe.
+   */
   title: string;
+  /**
+   * Display-only (subtotal, per-line price shown in CartDrawer). NEVER the
+   * source of a Stripe charge — `checkoutAction` re-fetches the real price
+   * from `commerce.getProductByHandle(handle, locale)` and ignores this
+   * field entirely, since it's client-controlled (Server Action argument /
+   * localStorage) and trivially tamperable.
+   */
   price: Money;
   cover: MediaItem | null;
-  /** Always 1 — one-of-one pieces never stack. */
+  /**
+   * Always 1 — one-of-one pieces never stack. Display-only, same as
+   * `price`/`title` above: `checkoutAction` always charges quantity 1 per
+   * handle regardless of this value.
+   */
   quantity: number;
 }
 

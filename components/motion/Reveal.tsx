@@ -51,7 +51,11 @@ export function Reveal({
   }
 
   const transition = { duration: DURATION_SETTLE, delay, ease: EASE_OUT };
-  const hidden = { opacity: 0, y };
+  // Below-the-fold content must never need JS to be READABLE: if the in-view
+  // observer never fires, an opacity-0 initial hides it forever. In-view
+  // reveals therefore animate transform only; `mount` may still fade, since
+  // JS has demonstrably run by the time it renders.
+  const hidden = mode === "mount" ? { opacity: 0, y } : { y };
   const shown = { opacity: 1, y: 0 };
 
   if (mode === "mount") {
@@ -72,7 +76,7 @@ export function Reveal({
       className={className}
       initial={hidden}
       whileInView={shown}
-      viewport={{ once: true, amount: 0.2 }}
+      viewport={{ once: true, amount: "some" }}
       transition={transition}
     >
       {children}
@@ -123,7 +127,7 @@ export function Stagger({
       ? { animate: "show" }
       : {
           whileInView: "show",
-          viewport: { once: true, amount: 0.2 },
+          viewport: { once: true, amount: "some" as const },
         }),
   } as const;
 

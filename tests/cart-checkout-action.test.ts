@@ -180,6 +180,34 @@ describe("checkoutAction — server-side re-pricing", () => {
     expect(createCheckoutSessionMock).not.toHaveBeenCalled();
     expect(redirectMock).not.toHaveBeenCalled();
   });
+
+  // A Sanity piece with a missing/blank price coalesces to 0 at the query
+  // boundary (lib/commerce/sanity/queries.ts). This guard is the only thing
+  // standing between that and a $0 Stripe line, so pin every invalid shape.
+  it.each([
+    ["zero", 0],
+    ["negative", -500],
+    ["non-integer", 1.5],
+  ])(
+    "blocks checkout without creating a session when the server price is %s",
+    async (_label, amount) => {
+      getAvailabilityMock.mockResolvedValue({ [LINE.handle]: "available" });
+      getProductByHandleMock.mockResolvedValue({
+        ...SERVER_PRODUCT,
+        price: { ...SERVER_PRODUCT.price, amount },
+      });
+
+      const result = await checkoutAction([LINE], "es");
+
+      expect(result).toEqual({
+        ok: false,
+        reason: "sold",
+        soldHandles: [LINE.handle],
+      });
+      expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+      expect(redirectMock).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("checkoutAction — resolveOrigin", () => {

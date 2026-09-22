@@ -75,7 +75,8 @@ export function pageTitle(label: string): string {
  * product-detail pages, whose description comes from Sanity/fixture copy
  * that isn't authored with a meta-description length budget in mind.
  */
-export function truncateDescription(text: string, maxLength = 160): string {
+export function truncateDescription(text: string | null | undefined, maxLength = 160): string {
+  if (!text) return "";
   if (text.length <= maxLength) return text;
   const clipped = text.slice(0, maxLength);
   const lastSpace = clipped.lastIndexOf(" ");

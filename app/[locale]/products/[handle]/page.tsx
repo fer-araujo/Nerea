@@ -4,6 +4,7 @@ import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { commerce } from "@/lib/commerce";
 import { routing } from "@/i18n/routing";
+import { Link } from "@/i18n/navigation";
 import { cn } from "@/lib/cn";
 import { buildPageMetadata, pageTitle, truncateDescription } from "@/lib/seo";
 import { Price } from "@/components/ui/Price";
@@ -74,7 +75,8 @@ export async function generateMetadata({
     locale,
     pathname: `/products/${handle}`,
     title: pageTitle(product.title),
-    description: truncateDescription(product.description),
+    description:
+      truncateDescription(product.description) || tMeta("home.description"),
     ogImageAlt: tMeta("ogImageAlt"),
   });
 }
@@ -108,6 +110,17 @@ export default async function ProductDetailPage({
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-16 sm:px-10 sm:py-24">
+      {/* A product page must not be a dead end: the only way back was the
+          header logo. Utility-label styling (mono, tracked, graphite) so it
+          reads as navigation and never competes with the piece's title. */}
+      <Link
+        href="/shop"
+        className="mb-10 inline-flex items-center gap-2 font-mono text-xs uppercase tracking-[0.14em] text-graphite transition-colors hover:text-ink"
+      >
+        <span aria-hidden="true">←</span>
+        {t("back")}
+      </Link>
+
       <div className="grid gap-10 lg:grid-cols-2 lg:gap-16">
         <ProductGallery media={product.media} alt={product.title} />
 

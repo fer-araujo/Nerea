@@ -88,10 +88,17 @@ export function staggerContainer(
   };
 }
 
-/** Child of a `staggerContainer` — inherits the hidden/show labels. */
+/** Child of a `staggerContainer` — inherits the hidden/show labels.
+ *
+ * The hidden state animates TRANSFORM ONLY, never opacity: these items sit
+ * below the fold and are revealed by an in-view observer. If that observer
+ * never fires (slow device, an ancestor the observer can't resolve, a stale
+ * bundle), an `opacity: 0` initial would leave real catalog content
+ * permanently invisible — which is exactly the bug this shape prevents.
+ * Losing a fade is invisible; losing the product grid is not. */
 export function staggerItem(y = 16): Variants {
   return {
-    hidden: { opacity: 0, y },
+    hidden: { y },
     show: {
       opacity: 1,
       y: 0,

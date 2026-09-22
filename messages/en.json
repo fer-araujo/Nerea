@@ -50,7 +50,8 @@
     "acquireCta": "Acquire this piece",
     "notFoundTitle": "This piece isn't here anymore",
     "notFoundBody": "The link may be broken, or the piece was removed from the catalog.",
-    "notFoundCta": "Back to the shop"
+    "notFoundCta": "Back to the shop",
+    "back": "Back to the shop"
   },
   "Cart": {
     "title": "Cart",

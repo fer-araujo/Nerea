@@ -134,7 +134,10 @@ export default async function LandingPage({
             <MediaFrame item={heroMedia} alt={heroMedia.alt ?? ""} sizes="100vw" priority />
             {/* Bone scrim: guarantees the text above stays legible no matter
                 what asset the artisan uploads. */}
-            <div className="absolute inset-0 bg-gradient-to-t from-bone via-bone/85 to-bone/55" />
+            <div className="absolute inset-0 bg-gradient-to-t from-bone via-bone/40 to-bone/10" />
+            {/* Horizontal field: the copy column on the left keeps a clean,
+                legible ground while the pieces on the right stay visible. */}
+            <div className="absolute inset-0 bg-gradient-to-r from-bone/85 via-bone/40 to-transparent" />
           </div>
 
           <div className="mx-auto grid w-full max-w-6xl items-center gap-10 lg:grid-cols-[1.3fr_1fr] lg:gap-16">
@@ -147,7 +150,7 @@ export default async function LandingPage({
               </h1>
               <p
                 data-hero-body
-                className="mt-6 max-w-md text-base leading-relaxed text-graphite sm:text-lg"
+                className="mt-6 max-w-md text-base leading-relaxed text-ink/75 sm:text-lg"
               >
                 {t("heroBody")}
               </p>
@@ -166,7 +169,7 @@ export default async function LandingPage({
               className="order-1 flex justify-center lg:order-2 lg:justify-end"
             >
               <span aria-hidden="true" className="text-ink/80">
-                <Logo variant="mark" className="h-28 w-auto sm:h-44 lg:h-60" />
+                <Logo variant="mark" className="text-[7rem] sm:text-[11rem] lg:text-[15rem]" />
               </span>
             </div>
           </div>

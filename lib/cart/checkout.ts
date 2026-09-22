@@ -104,7 +104,15 @@ export async function checkoutAction(
 
     for (const handle of handles) {
       const product = await commerce.getProductByHandle(handle, locale);
-      if (product === null || product.availability !== "available") {
+      if (
+        product === null ||
+        product.availability !== "available" ||
+        // A piece with no price (Sanity coalesces a missing one to 0) must
+        // never reach Stripe: billing it would mean a free order. Treat it
+        // as unavailable, exactly like a sold piece.
+        !Number.isInteger(product.price.amount) ||
+        product.price.amount <= 0
+      ) {
         unavailableHandles.push(handle);
         continue;
       }

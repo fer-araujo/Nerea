@@ -78,8 +78,8 @@ const HARNESS_ITEMS: Record<string, Omit<CartLineItem, "quantity">> = {
   "add-pendant-50": PENDANT_50,
 };
 
-function TestHarness() {
-  const { addItem, open } = useCart();
+function TestHarness({ paymentsEnabled }: { paymentsEnabled: boolean }) {
+  const { addItem, open, isOpen } = useCart();
   return (
     <>
       {Object.entries(HARNESS_ITEMS).map(([label, item]) => (
@@ -90,17 +90,22 @@ function TestHarness() {
       <button type="button" onClick={open}>
         open-drawer
       </button>
-      <CartDrawer />
+      {/* The cart's own open flag: readable at once, without waiting for the
+          drawer's exit animation to finish. */}
+      <span data-testid="cart-open">{String(isOpen)}</span>
+      <CartDrawer paymentsEnabled={paymentsEnabled} />
     </>
   );
 }
 
-function renderCart() {
+// Payments are on unless a test says otherwise, which is what the layout
+// passes once a Stripe key is configured.
+function renderCart(paymentsEnabled = true) {
   return render(
     <NextIntlClientProvider locale="es" messages={esMessages}>
       <MotionProvider>
         <CartProvider>
-          <TestHarness />
+          <TestHarness paymentsEnabled={paymentsEnabled} />
         </CartProvider>
       </MotionProvider>
     </NextIntlClientProvider>,
@@ -114,6 +119,94 @@ function storedCart(): CartLineItem[] {
 beforeEach(() => {
   window.localStorage.clear();
   checkoutActionMock.mockReset();
+});
+
+describe("CartDrawer — payments gate", () => {
+  it("keeps the checkout button, and offers no reserve link, while payments are on", async () => {
+    renderCart(true);
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText(ITEM_A.title);
+
+    expect(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(esMessages.Cart.paymentsSoon)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: esMessages.Cart.reserveCta }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the subtotal but swaps the checkout button for a reserve-by-message link while payments are off", async () => {
+    renderCart(false);
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText(ITEM_A.title);
+
+    // The line's price and the subtotal.
+    expect(screen.getByText(esMessages.Cart.subtotal)).toBeInTheDocument();
+    expect(screen.getAllByText("$1,850.00")).toHaveLength(2);
+    expect(screen.getByText(esMessages.Cart.paymentsSoon)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: esMessages.Cart.checkout }),
+    ).not.toBeInTheDocument();
+
+    const reserve = screen.getByRole("link", {
+      name: esMessages.Cart.reserveCta,
+    });
+    expect(reserve.getAttribute("href")).toMatch(/\/contact$/);
+    expect(checkoutActionMock).not.toHaveBeenCalled();
+  });
+
+  it("closes the drawer when the reserve link is followed", async () => {
+    // jsdom cannot navigate: cancel the default after React's handlers ran,
+    // so the click only exercises the drawer's own onClick.
+    const blockNavigation = (event: Event) => event.preventDefault();
+    document.addEventListener("click", blockNavigation);
+    try {
+      renderCart(false);
+      fireEvent.click(screen.getByText("add-a"));
+      await screen.findByText(ITEM_A.title);
+      expect(screen.getByTestId("cart-open")).toHaveTextContent("true");
+
+      fireEvent.click(
+        screen.getByRole("link", { name: esMessages.Cart.reserveCta }),
+      );
+
+      expect(screen.getByTestId("cart-open")).toHaveTextContent("false");
+    } finally {
+      document.removeEventListener("click", blockNavigation);
+    }
+  });
+
+  // The page can have been built with payments on and the key removed since:
+  // the action then refuses, and the drawer must fall back to the same footer
+  // instead of showing "try again" for something that cannot succeed.
+  it("switches to the reserve-by-message footer when the server reports payments disabled", async () => {
+    checkoutActionMock.mockResolvedValue({
+      ok: false,
+      reason: "payments-disabled",
+    });
+    renderCart(true);
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText(ITEM_A.title);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    );
+
+    expect(
+      await screen.findByText(esMessages.Cart.paymentsSoon),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: esMessages.Cart.reserveCta }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: esMessages.Cart.checkout }),
+    ).not.toBeInTheDocument();
+    // The cart is untouched and no error banner is shown on top of the note.
+    expect(screen.getByText(ITEM_A.title)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(storedCart().map((line) => line.handle)).toEqual([ITEM_A.handle]);
+  });
 });
 
 describe("CartDrawer — add and remove", () => {

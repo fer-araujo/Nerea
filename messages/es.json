@@ -28,7 +28,11 @@
   "Footer": {
     "tagline": "Taller de joyería de autor. Piezas únicas fundidas a la cera perdida.",
     "rights": "Todos los derechos reservados.",
-    "madeIn": "Hecho a mano en México."
+    "madeIn": "Hecho a mano en México.",
+    "legalNav": "Información legal",
+    "privacy": "Aviso de privacidad",
+    "terms": "Términos de compra",
+    "shipping": "Envíos y devoluciones"
   },
   "Product": {
     "available": "disponible",
@@ -74,12 +78,14 @@
     "errorRetry": "No se pudo iniciar el pago. Intenta de nuevo.",
     "optionRingSize": "Talla {value}",
     "optionChainLength": "Cadena {cm} cm",
-    "invalidOptionNotice": "Quitamos una pieza del carrito porque hay que elegir de nuevo su talla o largo de cadena. Hazlo desde la página de la pieza."
+    "invalidOptionNotice": "Quitamos una pieza del carrito porque hay que elegir de nuevo su talla o largo de cadena. Hazlo desde la página de la pieza.",
+    "paymentsSoon": "Los pagos en línea abren muy pronto. Escríbenos para apartar tus piezas.",
+    "reserveCta": "Apartar por mensaje"
   },
   "Checkout": {
     "successKicker": "Pedido confirmado",
     "successTitle": "Gracias por tu compra",
-    "successBody": "Tu pieza está confirmada. El taller se pondrá en contacto contigo con los detalles de envío.",
+    "successBody": "Tu pedido está confirmado. Ya tenemos tu dirección de envío y tu teléfono; la artesana te contactará por correo o por teléfono para coordinar la entrega.",
     "successCta": "Seguir explorando"
   },
   "About": {
@@ -135,6 +141,263 @@
     "contact": {
       "title": "Contacto",
       "description": "Escríbele directamente al taller para preguntas sobre una pieza o un encargo a medida."
+    },
+    "privacy": {
+      "title": "Aviso de privacidad",
+      "description": "Quién trata tus datos personales en nerea, para qué los usamos y cómo ejercer tus derechos de acceso, rectificación, cancelación y oposición."
+    },
+    "terms": {
+      "title": "Términos de compra",
+      "description": "Condiciones de compra de las piezas de nerea: piezas únicas, precios en pesos mexicanos, pago con Stripe y confirmación del pedido."
+    },
+    "shipping": {
+      "title": "Envíos y devoluciones",
+      "description": "Envíos dentro de México, tiempos de entrega y política de cambios y devoluciones para piezas únicas y a la medida."
+    }
+  },
+  "Legal": {
+    "draftTitle": "Borrador pendiente de revisión",
+    "draftBody": "Este texto es un borrador y todavía no lo han revisado la titular del taller ni un profesional jurídico. Los datos entre corchetes están por completar y el contenido puede cambiar.",
+    "updatedLabel": "Última actualización: {updated}",
+    "values": {
+      "owner": "[NOMBRE DE LA RESPONSABLE]",
+      "address": "[DOMICILIO]",
+      "email": "[CORREO DE CONTACTO]",
+      "phone": "[TELÉFONO DE CONTACTO]",
+      "updated": "[FECHA DE ACTUALIZACIÓN]",
+      "deliveryTime": "[PLAZO DE ENTREGA]",
+      "madeToSizeTime": "[PLAZO DE AJUSTE A LA MEDIDA]",
+      "returnWindow": "[PLAZO DE DEVOLUCIÓN]"
+    },
+    "privacy": {
+      "kicker": "Legal",
+      "title": "Aviso de privacidad",
+      "intro": "Este aviso explica quién trata tus datos personales cuando visitas nerea, nos escribes o compras una pieza, para qué los usamos y cómo puedes ejercer tus derechos, conforme a la legislación mexicana de protección de datos personales en posesión de particulares.",
+      "sections": [
+        {
+          "title": "1. Responsable del tratamiento de tus datos",
+          "paragraphs": [
+            "La responsable del tratamiento de tus datos personales es {owner}, persona física que opera el taller de joyería nerea (en adelante, nerea), con domicilio en {address}.",
+            "Puedes contactarla para cualquier asunto relacionado con este aviso en {email}."
+          ]
+        },
+        {
+          "title": "2. Datos personales que recabamos",
+          "paragraphs": [
+            "Solo recabamos los datos necesarios para cada finalidad y no solicitamos datos personales sensibles:"
+          ],
+          "items": [
+            "Si nos escribes desde el formulario de contacto: tu nombre, tu correo electrónico y el contenido de tu mensaje.",
+            "Si compras una pieza: tu nombre, correo electrónico, teléfono y dirección de envío, además de tus datos de pago. Estos datos se capturan directamente en la página de pago de Stripe; nerea no ve ni almacena el número de tu tarjeta.",
+            "Datos técnicos de conexión, como tu dirección IP y el tipo de dispositivo, que se generan automáticamente al visitar el sitio y que registra nuestro proveedor de alojamiento."
+          ]
+        },
+        {
+          "title": "3. Para qué usamos tus datos",
+          "paragraphs": [
+            "No usamos tus datos para publicidad ni mercadotecnia, y nunca los vendemos. Los usamos solo para las siguientes finalidades, todas necesarias para atenderte:"
+          ],
+          "items": [
+            "Responder tus mensajes y consultas sobre piezas o encargos a la medida.",
+            "Procesar y confirmar tu compra, y coordinar su entrega por correo o teléfono.",
+            "Atender aclaraciones, cambios, devoluciones y garantías.",
+            "Cumplir las obligaciones legales y fiscales que nos apliquen."
+          ]
+        },
+        {
+          "title": "4. Con quién compartimos tus datos",
+          "paragraphs": [
+            "Para operar el sitio nos apoyamos en los siguientes proveedores, que tratan datos por cuenta de nerea y con sus propias medidas de seguridad. Algunos están fuera de México, por lo que tus datos pueden almacenarse o procesarse en otros países. Fuera de ellos, solo compartimos tus datos si una autoridad competente lo exige conforme a la ley."
+          ],
+          "items": [
+            "Stripe (pagos): procesa tu pago y recaba tu nombre, correo, teléfono, dirección de envío y datos de pago al comprar; nos hace llegar lo necesario para preparar y enviar tu pedido.",
+            "Google Firebase (almacenamiento): guarda los mensajes del formulario de contacto, a los que solo accede la responsable de nerea con una cuenta autenticada.",
+            "Sanity (catálogo y contenido): aloja el catálogo de piezas, sus imágenes y los textos del sitio. No recibe tus datos de contacto ni de compra.",
+            "Netlify (alojamiento): publica el sitio y registra datos técnicos de conexión, como la dirección IP."
+          ]
+        },
+        {
+          "title": "5. Tus derechos (ARCO)",
+          "paragraphs": [
+            "Tienes derecho a acceder a tus datos personales, a rectificarlos si son inexactos o están incompletos, a cancelarlos cuando consideres que ya no se necesitan para las finalidades de este aviso y a oponerte a su tratamiento por causas legítimas (derechos ARCO). También puedes revocar en cualquier momento el consentimiento que nos hayas dado.",
+            "Para ejercer cualquiera de estos derechos, envía tu solicitud a {email} o por escrito a {address}, con esta información:"
+          ],
+          "items": [
+            "Tu nombre completo y un medio para responderte, por ejemplo tu correo.",
+            "Una descripción clara de los datos y del derecho que quieres ejercer.",
+            "Una copia simple de una identificación oficial vigente que acredite tu identidad."
+          ]
+        },
+        {
+          "title": "6. Nuestra respuesta y la autoridad",
+          "paragraphs": [
+            "Responderemos tu solicitud por el mismo medio, dentro de los plazos que marca la ley, e indicaremos si procede y cómo se hará efectiva.",
+            "Si consideras que tu derecho a la protección de datos personales ha sido vulnerado, puedes acudir a la autoridad de protección de datos personales competente en México."
+          ]
+        },
+        {
+          "title": "7. Cookies y almacenamiento en tu navegador",
+          "paragraphs": [
+            "Este sitio no usa cookies de publicidad ni de seguimiento. Guarda tu carrito de compras en el almacenamiento local de tu navegador y usa una cookie técnica para recordar tu idioma. Stripe, cuando pagas, y Netlify, al servir el sitio, pueden usar sus propias cookies técnicas o de seguridad. Puedes borrar estos datos desde la configuración de tu navegador."
+          ]
+        },
+        {
+          "title": "8. Conservación y seguridad",
+          "paragraphs": [
+            "Conservamos tus datos solo el tiempo necesario para cumplir las finalidades de este aviso y las obligaciones legales aplicables. Aplicamos medidas de seguridad administrativas, técnicas y físicas razonables para protegerlos contra daño, pérdida, alteración o acceso no autorizado."
+          ]
+        },
+        {
+          "title": "9. Cambios a este aviso",
+          "paragraphs": [
+            "Podemos modificar este aviso por cambios legales o en la forma en que operamos el sitio. La versión vigente estará siempre en esta página, con su fecha de actualización. Si el cambio afecta de manera relevante el tratamiento de tus datos, te lo haremos saber por el correo que nos hayas proporcionado."
+          ]
+        }
+      ]
+    },
+    "terms": {
+      "kicker": "Legal",
+      "title": "Términos de compra",
+      "intro": "Estos términos regulan las compras que haces en nerea. Léelos antes de pagar: al completar una compra aceptas lo que aquí se describe.",
+      "sections": [
+        {
+          "title": "1. Quién vende",
+          "paragraphs": [
+            "Las piezas las vende {owner}, persona física que opera el taller de joyería nerea, con domicilio en {address}.",
+            "Puedes contactarla en {email} o en el teléfono {phone}."
+          ]
+        },
+        {
+          "title": "2. Piezas únicas",
+          "paragraphs": [
+            "Cada pieza se funde y se termina a mano, y existe una sola vez (1 de 1). Cuando se vende, no se repite ni se repone.",
+            "Por ser artesanales, puede haber diferencias mínimas de tono, textura o acabado entre la pieza y lo que ves en pantalla.",
+            "Como cada pieza es única, solo una persona puede comprarla. Si por una coincidencia de compras una pieza ya no pudiera entregarse, te avisaremos y te reembolsaremos íntegramente lo que hayas pagado."
+          ]
+        },
+        {
+          "title": "3. Precios e impuestos",
+          "paragraphs": [
+            "Todos los precios están en pesos mexicanos (MXN) e incluyen los impuestos aplicables. El costo de envío se muestra aparte, antes de que pagues.",
+            "Si detectamos un error evidente en un precio, te lo diremos antes de enviar tu pedido y podrás confirmar la compra con el precio correcto o cancelarla con reembolso completo."
+          ]
+        },
+        {
+          "title": "4. Pago",
+          "paragraphs": [
+            "Los pagos se procesan a través de Stripe, un procesador de pagos independiente, en su página de pago segura. nerea no recibe ni almacena los datos de tu tarjeta. Los medios de pago disponibles son los que Stripe muestre al momento de pagar.",
+            "Mientras los pagos en línea no estén disponibles, puedes apartar una pieza escribiéndonos. El apartado queda confirmado cuando te respondemos por escrito y acordamos contigo la forma de pago y el plazo para completarla."
+          ]
+        },
+        {
+          "title": "5. Piezas a la medida",
+          "paragraphs": [
+            "Algunas piezas se ofrecen con una talla de anillo o un largo de cadena que eliges al comprar. La pieza se ajusta a tu elección antes de enviarse, por lo que es una pieza hecha a la medida.",
+            "Revisa tu elección antes de pagar y, si tienes dudas sobre tu talla, escríbenos antes de comprar. Si necesitas cambiarla después de pagar, avísanos lo antes posible: solo podremos hacerlo si la pieza aún no se ha ajustado.",
+            "Las piezas a la medida tienen condiciones especiales de cambio y devolución, que se explican en la página de envíos y devoluciones."
+          ]
+        },
+        {
+          "title": "6. Confirmación del pedido",
+          "paragraphs": [
+            "Tu pedido queda confirmado cuando Stripe aprueba el pago y ves la pantalla de confirmación. Stripe puede enviarte un comprobante de pago al correo que indiques.",
+            "Después, nos pondremos en contacto contigo por correo o teléfono para coordinar la entrega con los datos que capturaste al pagar. Revisa que tu dirección, tu correo y tu teléfono sean correctos: los necesitamos para entregarte tu pieza.",
+            "Si no podemos cumplir un pedido (por ejemplo, porque la pieza ya no está disponible o no logramos aclarar un dato de envío), lo cancelaremos y te reembolsaremos íntegramente lo que hayas pagado."
+          ]
+        },
+        {
+          "title": "7. Envíos, cambios y devoluciones",
+          "paragraphs": [
+            "Las condiciones de entrega, cambios y devoluciones están en la página de envíos y devoluciones, que forma parte de estos términos."
+          ]
+        },
+        {
+          "title": "8. Propiedad intelectual",
+          "paragraphs": [
+            "Los diseños, las fotografías, los textos y la marca de nerea pertenecen a su titular. No pueden copiarse ni reproducirse sin autorización por escrito."
+          ]
+        },
+        {
+          "title": "9. Dudas, quejas y ley aplicable",
+          "paragraphs": [
+            "Si tienes una duda o una queja, escríbenos primero a {email}: queremos resolverla contigo directamente. También puedes acudir a la Procuraduría Federal del Consumidor (Profeco).",
+            "Estos términos se rigen por las leyes de los Estados Unidos Mexicanos y no limitan los derechos que esas leyes te reconocen como persona consumidora."
+          ]
+        },
+        {
+          "title": "10. Cambios a estos términos",
+          "paragraphs": [
+            "Podemos actualizar estos términos. La versión vigente estará siempre en esta página y se aplica a las compras hechas después de su publicación."
+          ]
+        }
+      ]
+    },
+    "shipping": {
+      "kicker": "Legal",
+      "title": "Envíos y devoluciones",
+      "intro": "Aquí explicamos a dónde enviamos, cuánto tarda un pedido y cómo funcionan los cambios y las devoluciones de piezas únicas y a la medida.",
+      "sections": [
+        {
+          "title": "1. Cobertura",
+          "paragraphs": [
+            "Por ahora enviamos únicamente dentro de México. No hacemos envíos internacionales.",
+            "La dirección de entrega se captura en la página de pago. Revisa que esté completa y correcta: no podemos garantizar la entrega con datos erróneos."
+          ]
+        },
+        {
+          "title": "2. Costo de envío",
+          "paragraphs": [
+            "El envío tiene una tarifa fija por pedido, sin importar cuántas piezas incluya. El importe vigente (o «envío gratis», cuando aplique) aparece en la página de pago antes de que pagues."
+          ]
+        },
+        {
+          "title": "3. Tiempos de entrega",
+          "paragraphs": [
+            "El tiempo estimado de entrega es de {deliveryTime}, contados desde la confirmación del pago. Es un estimado: depende de la paquetería y de tu zona.",
+            "Las piezas con talla de anillo o largo de cadena a la medida requieren un tiempo adicional de ajuste: {madeToSizeTime}.",
+            "Nos pondremos en contacto contigo por correo o teléfono para coordinar la entrega y, cuando tu pedido salga, compartirte su número de guía."
+          ]
+        },
+        {
+          "title": "4. Cuando recibas tu pedido",
+          "paragraphs": [
+            "Revisa el paquete y la pieza al recibirlos. Si algo llega dañado o no corresponde a lo que compraste, escríbenos lo antes posible a {email} con fotografías del paquete y de la pieza."
+          ]
+        },
+        {
+          "title": "5. Devoluciones de piezas únicas",
+          "paragraphs": [
+            "Puedes solicitar la devolución de una pieza que no sea a la medida dentro de {returnWindow}, contados desde que la recibes, siempre que esté sin uso, en las mismas condiciones en que la recibiste y con su empaque.",
+            "Cuando recibamos y revisemos la pieza, te reembolsaremos su precio al mismo medio de pago, a través de Stripe. El tiempo en que se refleje depende de tu banco."
+          ]
+        },
+        {
+          "title": "6. Piezas a la medida",
+          "paragraphs": [
+            "Las piezas con talla de anillo o largo de cadena elegidos al comprar se ajustan especialmente para ti, por lo que no admiten cambio ni devolución por arrepentimiento. Sí los admiten si tienen un defecto de fabricación o si nos equivocamos (por ejemplo, si enviamos una talla distinta a la que elegiste).",
+            "Si dudas de tu talla o del largo de cadena, escríbenos antes de comprar."
+          ]
+        },
+        {
+          "title": "7. Cambios",
+          "paragraphs": [
+            "Como las piezas no se reponen, un cambio solo es posible por otra pieza que esté disponible en el momento de la solicitud, y se acuerda por escrito."
+          ]
+        },
+        {
+          "title": "8. Defectos de fabricación",
+          "paragraphs": [
+            "Si tu pieza llega con un defecto de fabricación, contáctanos. La repararemos, la cambiaremos o te reembolsaremos su importe, según corresponda y conforme a la ley."
+          ]
+        },
+        {
+          "title": "9. Cómo solicitar una devolución o un cambio",
+          "paragraphs": [
+            "Escribe a {email} o llama al {phone}, indicando tu nombre, el correo con el que compraste y la pieza. Te diremos cómo devolverla. El envío de la devolución corre por cuenta de quien la solicita, salvo que se deba a un defecto de la pieza o a un error de nerea.",
+            "Lo anterior no limita los derechos que la legislación mexicana de protección al consumidor te reconoce."
+          ]
+        }
+      ]
     }
   }
 }

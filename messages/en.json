@@ -28,7 +28,11 @@
   "Footer": {
     "tagline": "Author jewelry atelier. One-of-a-kind pieces, lost-wax cast.",
     "rights": "All rights reserved.",
-    "madeIn": "Handmade in Mexico."
+    "madeIn": "Handmade in Mexico.",
+    "legalNav": "Legal information",
+    "privacy": "Privacy notice",
+    "terms": "Terms of purchase",
+    "shipping": "Shipping and returns"
   },
   "Product": {
     "available": "available",
@@ -74,12 +78,14 @@
     "errorRetry": "Payment could not start. Please try again.",
     "optionRingSize": "Size {value}",
     "optionChainLength": "{cm} cm chain",
-    "invalidOptionNotice": "We removed a piece from your cart because its size or chain length needs to be chosen again. You can do that from the piece's page."
+    "invalidOptionNotice": "We removed a piece from your cart because its size or chain length needs to be chosen again. You can do that from the piece's page.",
+    "paymentsSoon": "Online payments open very soon. Write to us to reserve your pieces.",
+    "reserveCta": "Reserve by message"
   },
   "Checkout": {
     "successKicker": "Order confirmed",
     "successTitle": "Thank you for your purchase",
-    "successBody": "Your piece is confirmed. The atelier will reach out with shipping details.",
+    "successBody": "Your order is confirmed. We have your shipping address and phone number; the artisan will contact you by email or phone to coordinate delivery.",
     "successCta": "Keep browsing"
   },
   "About": {
@@ -135,6 +141,263 @@
     "contact": {
       "title": "Contact",
       "description": "Write directly to the atelier with questions about a piece or a custom commission."
+    },
+    "privacy": {
+      "title": "Privacy notice",
+      "description": "Who handles your personal data at nerea, what we use it for and how to exercise your access, rectification, cancellation and objection rights."
+    },
+    "terms": {
+      "title": "Terms of purchase",
+      "description": "Purchase terms for nerea's pieces: one-of-one pieces, prices in Mexican pesos, payment through Stripe and order confirmation."
+    },
+    "shipping": {
+      "title": "Shipping and returns",
+      "description": "Shipping within Mexico, delivery times, and the exchange and return policy for one-of-one and made-to-size pieces."
+    }
+  },
+  "Legal": {
+    "draftTitle": "Draft pending review",
+    "draftBody": "This text is a draft and has not yet been reviewed by the atelier's owner or by a legal professional. The details in square brackets are still to be completed and the content may change.",
+    "updatedLabel": "Last updated: {updated}",
+    "values": {
+      "owner": "[NAME OF THE OWNER]",
+      "address": "[ADDRESS]",
+      "email": "[CONTACT EMAIL]",
+      "phone": "[CONTACT PHONE]",
+      "updated": "[UPDATE DATE]",
+      "deliveryTime": "[DELIVERY TIME]",
+      "madeToSizeTime": "[MADE-TO-SIZE FITTING TIME]",
+      "returnWindow": "[RETURN WINDOW]"
+    },
+    "privacy": {
+      "kicker": "Legal",
+      "title": "Privacy notice",
+      "intro": "This notice explains who handles your personal data when you visit nerea, write to us or buy a piece, what we use it for and how you can exercise your rights, under Mexican law on the protection of personal data held by private parties. This English version is a courtesy translation: if there is any difference, the Spanish version prevails.",
+      "sections": [
+        {
+          "title": "1. Who is responsible for your data",
+          "paragraphs": [
+            "The party responsible for handling your personal data is {owner}, an individual who runs the nerea jewelry atelier (nerea, below), located at {address}.",
+            "You can reach her about anything related to this notice at {email}."
+          ]
+        },
+        {
+          "title": "2. Personal data we collect",
+          "paragraphs": [
+            "We only collect the data needed for each purpose, and we do not ask for sensitive personal data:"
+          ],
+          "items": [
+            "If you write to us through the contact form: your name, your email address and the content of your message.",
+            "If you buy a piece: your name, email address, phone number and shipping address, plus your payment details. This data is entered directly on Stripe's payment page; nerea never sees or stores your card number.",
+            "Technical connection data, such as your IP address and device type, which is generated automatically when you visit the site and recorded by our hosting provider."
+          ]
+        },
+        {
+          "title": "3. What we use your data for",
+          "paragraphs": [
+            "We do not use your data for advertising or marketing, and we never sell it. We use it only for the following purposes, all of them necessary to serve you:"
+          ],
+          "items": [
+            "To answer your messages and questions about pieces or made-to-size commissions.",
+            "To process and confirm your purchase, and to coordinate its delivery by email or phone.",
+            "To handle clarifications, exchanges, returns and warranty claims.",
+            "To meet the legal and tax obligations that apply to us."
+          ]
+        },
+        {
+          "title": "4. Who we share your data with",
+          "paragraphs": [
+            "To run the site we rely on the providers below, which handle data on nerea's behalf and under their own security measures. Some are located outside Mexico, so your data may be stored or processed in other countries. Apart from them, we only share your data if a competent authority requires it under the law."
+          ],
+          "items": [
+            "Stripe (payments): processes your payment and collects your name, email, phone, shipping address and payment details when you buy; it passes us what we need to prepare and ship your order.",
+            "Google Firebase (storage): stores the messages sent through the contact form, which only nerea's owner can read, through an authenticated account.",
+            "Sanity (catalog and content): hosts the catalog of pieces, their images and the site's texts. It does not receive your contact or purchase data.",
+            "Netlify (hosting): publishes the site and records technical connection data, such as your IP address."
+          ]
+        },
+        {
+          "title": "5. Your rights (ARCO)",
+          "paragraphs": [
+            "You have the right to access your personal data, to rectify it if it is inaccurate or incomplete, to cancel it when you believe it is no longer needed for the purposes of this notice, and to object to its processing for legitimate reasons (ARCO rights). You can also withdraw, at any time, the consent you have given us.",
+            "To exercise any of these rights, send your request to {email} or in writing to {address}, including:"
+          ],
+          "items": [
+            "Your full name and a way to reply to you, such as your email.",
+            "A clear description of the data and of the right you want to exercise.",
+            "A simple copy of a valid official ID that proves your identity."
+          ]
+        },
+        {
+          "title": "6. Our reply and the authority",
+          "paragraphs": [
+            "We will reply to your request by the same means, within the deadlines set by law, and tell you whether it is granted and how it will be carried out.",
+            "If you believe your right to the protection of personal data has been violated, you can turn to the competent personal data protection authority in Mexico."
+          ]
+        },
+        {
+          "title": "7. Cookies and browser storage",
+          "paragraphs": [
+            "This site uses no advertising or tracking cookies. It keeps your shopping cart in your browser's local storage and uses a technical cookie to remember your language. Stripe (when you pay) and Netlify (when serving the site) may use their own technical or security cookies. You can clear this data from your browser settings."
+          ]
+        },
+        {
+          "title": "8. Retention and security",
+          "paragraphs": [
+            "We keep your data only as long as needed to meet the purposes of this notice and the legal obligations that apply. We use reasonable administrative, technical and physical security measures to protect it against damage, loss, alteration or unauthorized access."
+          ]
+        },
+        {
+          "title": "9. Changes to this notice",
+          "paragraphs": [
+            "We may change this notice because of legal changes or changes in how we run the site. The current version is always on this page, with its update date. If a change significantly affects how your data is handled, we will let you know at the email you gave us."
+          ]
+        }
+      ]
+    },
+    "terms": {
+      "kicker": "Legal",
+      "title": "Terms of purchase",
+      "intro": "These terms govern the purchases you make at nerea. Read them before paying: by completing a purchase you accept what is described here. This English version is a courtesy translation: if there is any difference, the Spanish version prevails.",
+      "sections": [
+        {
+          "title": "1. Who sells",
+          "paragraphs": [
+            "The pieces are sold by {owner}, an individual who runs the nerea jewelry atelier, located at {address}.",
+            "You can reach her at {email} or by phone at {phone}."
+          ]
+        },
+        {
+          "title": "2. One-of-one pieces",
+          "paragraphs": [
+            "Every piece is cast and finished by hand, and exists only once (1 of 1). When it sells, it is not made again or restocked.",
+            "Because they are handmade, there may be slight differences in tone, texture or finish between the piece and what you see on screen.",
+            "Since each piece is unique, only one person can buy it. If, because of overlapping purchases, a piece can no longer be delivered, we will let you know and fully refund what you paid."
+          ]
+        },
+        {
+          "title": "3. Prices and taxes",
+          "paragraphs": [
+            "All prices are in Mexican pesos (MXN) and include applicable taxes. Shipping is shown separately, before you pay.",
+            "If we spot an obvious pricing error, we will tell you before shipping your order, and you can confirm the purchase at the correct price or cancel it with a full refund."
+          ]
+        },
+        {
+          "title": "4. Payment",
+          "paragraphs": [
+            "Payments are processed through Stripe, an independent payment processor, on its secure payment page. nerea does not receive or store your card details. The payment methods available are the ones Stripe shows at checkout.",
+            "While online payments are not available, you can reserve a piece by writing to us. The reservation is confirmed when we reply in writing and agree with you on the payment method and the time to complete it."
+          ]
+        },
+        {
+          "title": "5. Made-to-size pieces",
+          "paragraphs": [
+            "Some pieces are offered with a ring size or a chain length that you choose at purchase. The piece is adjusted to your choice before it ships, which makes it a made-to-size piece.",
+            "Check your choice before paying and, if you are unsure about your size, write to us before buying. If you need to change it after paying, tell us as soon as possible: we can only do it if the piece has not been adjusted yet.",
+            "Made-to-size pieces have special exchange and return conditions, explained on the shipping and returns page."
+          ]
+        },
+        {
+          "title": "6. Order confirmation",
+          "paragraphs": [
+            "Your order is confirmed when Stripe approves the payment and you see the confirmation screen. Stripe may send you a payment receipt at the email you provide.",
+            "After that, we will contact you by email or phone to coordinate delivery using the details you entered when paying. Please check that your address, email and phone number are correct: we need them to deliver your piece.",
+            "If we cannot fulfill an order (for example, because the piece is no longer available or we cannot clarify a shipping detail), we will cancel it and fully refund what you paid."
+          ]
+        },
+        {
+          "title": "7. Shipping, exchanges and returns",
+          "paragraphs": [
+            "Delivery, exchange and return conditions are on the shipping and returns page, which is part of these terms."
+          ]
+        },
+        {
+          "title": "8. Intellectual property",
+          "paragraphs": [
+            "nerea's designs, photographs, texts and brand belong to their owner. They may not be copied or reproduced without written permission."
+          ]
+        },
+        {
+          "title": "9. Questions, complaints and governing law",
+          "paragraphs": [
+            "If you have a question or a complaint, write to us first at {email}: we want to solve it with you directly. You can also turn to the Federal Consumer Protection Agency (Profeco).",
+            "These terms are governed by the laws of the United Mexican States and do not limit the rights those laws give you as a consumer."
+          ]
+        },
+        {
+          "title": "10. Changes to these terms",
+          "paragraphs": [
+            "We may update these terms. The current version is always on this page and applies to purchases made after it is published."
+          ]
+        }
+      ]
+    },
+    "shipping": {
+      "kicker": "Legal",
+      "title": "Shipping and returns",
+      "intro": "Here we explain where we ship, how long an order takes and how exchanges and returns work for one-of-one and made-to-size pieces. This English version is a courtesy translation: if there is any difference, the Spanish version prevails.",
+      "sections": [
+        {
+          "title": "1. Coverage",
+          "paragraphs": [
+            "For now we only ship within Mexico. We do not ship internationally.",
+            "Your delivery address is entered on the payment page. Check that it is complete and correct: we cannot guarantee delivery with wrong details."
+          ]
+        },
+        {
+          "title": "2. Shipping cost",
+          "paragraphs": [
+            "Shipping is a flat fee per order, regardless of how many pieces it includes. The current amount (or \"free shipping\", when it applies) appears on the payment page before you pay."
+          ]
+        },
+        {
+          "title": "3. Delivery times",
+          "paragraphs": [
+            "The estimated delivery time is {deliveryTime}, counted from payment confirmation. It is an estimate: it depends on the carrier and on your area.",
+            "Pieces with a made-to-size ring size or chain length need extra time for fitting: {madeToSizeTime}.",
+            "We will contact you by email or phone to coordinate delivery and, once your order ships, share its tracking number."
+          ]
+        },
+        {
+          "title": "4. When you receive your order",
+          "paragraphs": [
+            "Check the package and the piece when you receive them. If something arrives damaged or is not what you bought, write to us as soon as possible at {email} with photos of the package and the piece."
+          ]
+        },
+        {
+          "title": "5. Returns of one-of-one pieces",
+          "paragraphs": [
+            "You can request the return of a piece that is not made-to-size within {returnWindow}, counted from when you receive it, as long as it is unused, in the same condition you received it and in its packaging.",
+            "Once we receive and check the piece, we will refund its price to the same payment method through Stripe. How long it takes to show up depends on your bank."
+          ]
+        },
+        {
+          "title": "6. Made-to-size pieces",
+          "paragraphs": [
+            "Pieces with a ring size or chain length chosen at purchase are fitted especially for you, so they cannot be exchanged or returned for a change of mind. They can be if they have a manufacturing defect or if we make a mistake (for example, if we send a size other than the one you chose).",
+            "If you are unsure about your size or chain length, write to us before buying."
+          ]
+        },
+        {
+          "title": "7. Exchanges",
+          "paragraphs": [
+            "Since pieces are not restocked, an exchange is only possible for another piece that is available when you ask, and it is agreed in writing."
+          ]
+        },
+        {
+          "title": "8. Manufacturing defects",
+          "paragraphs": [
+            "If your piece arrives with a manufacturing defect, contact us. We will repair it, replace it or refund its price, as appropriate and in accordance with the law."
+          ]
+        },
+        {
+          "title": "9. How to request a return or an exchange",
+          "paragraphs": [
+            "Write to {email} or call {phone}, giving your name, the email you bought with and the piece. We will tell you how to send it back. The cost of the return shipment is borne by whoever requests it, unless it is due to a defect in the piece or an error by nerea.",
+            "None of this limits the rights that Mexican consumer protection law gives you."
+          ]
+        }
+      ]
     }
   }
 }

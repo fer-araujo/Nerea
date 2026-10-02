@@ -4,6 +4,8 @@ import { getMessages, getTranslations, setRequestLocale } from "next-intl/server
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { getSiteUrl, ogLocale, SITE_NAME } from "@/lib/seo";
+import { isStripeConfigured } from "@/lib/commerce/stripe/config";
+import { omitLegalCopy } from "@/lib/legal/content";
 import { MotionProvider } from "@/components/motion/MotionProvider";
 import { CartProvider } from "@/lib/cart/cart-context";
 import { Header } from "@/components/layout/Header";
@@ -71,7 +73,10 @@ export default async function LocaleLayout({
   // pages built for task 2.17 render, but never as SSG (verified via
   // `next build -d`: "Static generation failed due to dynamic usage on
   // /es/products/... , reason: headers").
-  const messages = await getMessages();
+  //
+  // The legal pages' copy is left out: it is long, only Server Components
+  // render it, and passing it here would serialize it into every page.
+  const messages = omitLegalCopy(await getMessages());
 
   return (
     <html
@@ -85,7 +90,8 @@ export default async function LocaleLayout({
               <Header locale={locale} />
               {children}
               <Footer locale={locale} />
-              <CartDrawer />
+              {/* Only the boolean crosses to the client; the key never does. */}
+              <CartDrawer paymentsEnabled={isStripeConfigured()} />
             </CartProvider>
           </MotionProvider>
         </NextIntlClientProvider>

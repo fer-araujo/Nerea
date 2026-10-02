@@ -9,10 +9,22 @@ import {
   type CheckoutLineInput,
   type CheckoutOptionInput,
 } from "@/lib/commerce/stripe/checkout";
+import { isStripeConfigured } from "@/lib/commerce/stripe/config";
 import { getPathname } from "@/i18n/navigation";
 import { getShippingFee } from "@/lib/site-settings/adapter";
 import type { Locale } from "@/lib/commerce/types";
 import type { CartLineItem } from "./cart-context";
+
+export interface CheckoutPaymentsDisabledResult {
+  ok: false;
+  /**
+   * Online payments are not switched on yet (no Stripe key). The cart is left
+   * untouched and the drawer swaps its checkout button for "reserve by
+   * message". Distinct from `checkout-failed`, which invites a retry that
+   * could never succeed here.
+   */
+  reason: "payments-disabled";
+}
 
 export interface CheckoutSoldResult {
   ok: false;
@@ -43,6 +55,7 @@ export interface CheckoutFailedResult {
 }
 
 export type CheckoutActionResult =
+  | CheckoutPaymentsDisabledResult
   | CheckoutSoldResult
   | CheckoutInvalidOptionResult
   | CheckoutFailedResult;
@@ -68,10 +81,13 @@ async function resolveOrigin(): Promise<string> {
   return `${protocol}://${host}`;
 }
 
-// Server Action: the sole seam between the client cart and Stripe. Per
-// ADR-5 (design.md), availability is re-validated against lib/commerce
-// FIRST — a piece that sold after being added to the cart must never reach
-// Stripe. `redirect()` is deliberately called OUTSIDE the try/catch below,
+// Server Action: the sole seam between the client cart and Stripe. While
+// payments are off (no Stripe key) it refuses before anything else: a
+// Server Action is a public endpoint, so hiding the checkout button in the
+// drawer is not enough — the guard has to live here, ahead of any Sanity read.
+// Per ADR-5 (design.md), availability is then re-validated against
+// lib/commerce — a piece that sold after being added to the cart must never
+// reach Stripe. `redirect()` is deliberately called OUTSIDE the try/catch below,
 // so its internal Next.js control-flow throw is never swallowed by this
 // action's own error handling; everything that can legitimately fail (the
 // availability re-check, the re-pricing fetch, building the Stripe session)
@@ -98,6 +114,10 @@ export async function checkoutAction(
   lines: CartLineItem[],
   locale: Locale,
 ): Promise<CheckoutActionResult> {
+  if (!isStripeConfigured()) {
+    return { ok: false, reason: "payments-disabled" };
+  }
+
   let redirectUrl: string;
 
   try {

@@ -2,11 +2,19 @@ import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Logo } from "@/components/brand/Logo";
 
+// The legal pages, in the order the baseline lists them. `label` is a key of
+// the `Footer` messages.
+const LEGAL_LINKS = [
+  { href: "/privacidad", label: "privacy" },
+  { href: "/terminos", label: "terms" },
+  { href: "/envios", label: "shipping" },
+] as const;
+
 // Minimal atelier footer: the wordmark, a one-line credit, the secondary nav
 // (shop, about, contact — the primary Shop CTA lives in the sticky Header;
 // About/Contact live here to keep the height-capped Header quiet on mobile),
-// and a quiet baseline. No version stamps, no atmospheric locale strip — just
-// the mark and the maker's credit.
+// and a quiet baseline with the legal links. No version stamps, no atmospheric
+// locale strip — just the mark and the maker's credit.
 export async function Footer({ locale }: { locale: string }) {
   const t = await getTranslations({ locale, namespace: "Footer" });
   const nav = await getTranslations({ locale, namespace: "Nav" });
@@ -48,11 +56,27 @@ export async function Footer({ locale }: { locale: string }) {
           </nav>
         </div>
 
-        <div className="mt-12 flex flex-col gap-2 border-t border-line pt-6 font-mono text-xs text-graphite sm:flex-row sm:items-center sm:justify-between">
-          <span>
-            © {year} nerea. {t("rights")}
-          </span>
-          <span>{t("madeIn")}</span>
+        <div className="mt-12 border-t border-line pt-6 font-mono text-xs text-graphite">
+          <nav
+            aria-label={t("legalNav")}
+            className="flex flex-wrap gap-x-6 gap-y-2"
+          >
+            {LEGAL_LINKS.map(({ href, label }) => (
+              <Link
+                key={href}
+                href={href}
+                className="w-fit underline decoration-line underline-offset-4 transition-colors hover:text-ink hover:decoration-brass"
+              >
+                {t(label)}
+              </Link>
+            ))}
+          </nav>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              © {year} nerea. {t("rights")}
+            </span>
+            <span>{t("madeIn")}</span>
+          </div>
         </div>
       </div>
     </footer>

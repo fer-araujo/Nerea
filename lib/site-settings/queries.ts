@@ -19,3 +19,14 @@ export const SITE_SETTINGS_QUERY = `
   "heroAlt": coalesce(heroAlt[$locale], heroAlt.es)
 }
 `;
+
+// Flat shipping fee in centavos (same unit as a product's price.amount); an
+// unset field projects to 0 = free shipping. A separate, narrow query on
+// purpose: it is read only server-side at checkout (see getShippingFee in
+// ./adapter.ts) and must not widen the chrome query that runs on every route.
+// The option defaults (`ringSizes` / `chainLengths`) are NOT read here — they
+// are projected inside the product query (lib/commerce/sanity/queries.ts) so
+// a piece's options resolve in a single round trip.
+export const SHIPPING_FEE_QUERY = `
+coalesce(*[_id == "siteSettings"][0].shippingFee, 0)
+`;

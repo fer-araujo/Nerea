@@ -5,13 +5,35 @@ import { useLocale, useTranslations } from "next-intl";
 import { AnimatePresence, m } from "motion/react";
 import Image from "next/image";
 import { Link } from "@/i18n/navigation";
-import { useCart } from "@/lib/cart/cart-context";
+import { useCart, type CartLineItem } from "@/lib/cart/cart-context";
 import { checkoutAction } from "@/lib/cart/checkout";
 import { Price } from "@/components/ui/Price";
 import { PlaceholderBlock } from "@/components/ui/PlaceholderBlock";
 import { DURATION_BASE, EASE_OUT } from "@/components/motion/transitions";
 import type { Locale, Money } from "@/lib/commerce/types";
 import { cn } from "@/lib/cn";
+
+// The chosen ring size / chain length under a line's title ("Talla 7",
+// "Cadena 45 cm"). Cart lines come back from localStorage — client-controlled,
+// possibly from an older shape — so the option's fields are checked at
+// runtime and anything unrecognized renders nothing instead of "Talla undefined".
+function CartLineOption({ option }: { option: CartLineItem["option"] }) {
+  const t = useTranslations("Cart");
+
+  let label: string | null = null;
+  if (option?.kind === "ringSize" && typeof option.value === "string") {
+    label = t("optionRingSize", { value: option.value });
+  } else if (
+    option?.kind === "chainLength" &&
+    typeof option.lengthCm === "number"
+  ) {
+    label = t("optionChainLength", { cm: option.lengthCm });
+  }
+
+  return label ? (
+    <p className="mt-1 font-mono text-xs text-graphite">{label}</p>
+  ) : null;
+}
 
 // Slide-over cart. Opens on add (CartProvider.addItem sets isOpen), lists
 // line items with a remove control, and hands off to the Stripe Checkout
@@ -62,10 +84,15 @@ export function CartDrawer() {
     setStatus("pending");
     const result = await checkoutAction(items, locale);
     // A successful checkoutAction() never returns — it redirects. Reaching
-    // this line always means one of the two error branches happened.
+    // this line always means one of the error branches happened.
     if (result.reason === "sold") {
       removeItems(result.soldHandles);
       setError(t("soldNotice"));
+    } else if (result.reason === "invalid-option") {
+      // Same shape as the sold flow: the offending lines leave the cart, and
+      // the shopper re-adds each piece after choosing its option again.
+      removeItems(result.handles);
+      setError(t("invalidOptionNotice"));
     } else {
       setError(t("errorRetry"));
     }
@@ -76,6 +103,18 @@ export function CartDrawer() {
     amount: items.reduce((sum, item) => sum + item.price.amount, 0),
     currency: "MXN",
   };
+
+  // Rendered in BOTH the list and the empty state: removing the only line (a
+  // sold or invalid-option piece) empties the cart, and the notice explaining
+  // why would otherwise vanish together with it.
+  const errorNotice = error ? (
+    <p
+      role="alert"
+      className="mb-4 border border-ink/25 bg-bone-sunk px-4 py-3 font-mono text-xs leading-relaxed text-ink"
+    >
+      {error}
+    </p>
+  ) : null;
 
   return (
     <AnimatePresence>
@@ -121,6 +160,7 @@ export function CartDrawer() {
 
             {items.length === 0 ? (
               <div className="flex flex-1 flex-col items-start justify-center gap-3 px-6">
+                {errorNotice}
                 <p className="font-display text-lg text-ink">{t("empty")}</p>
                 <p className="text-sm text-graphite">{t("emptyBody")}</p>
                 <Link
@@ -164,9 +204,12 @@ export function CartDrawer() {
                     </div>
 
                     <div className="flex flex-1 flex-col justify-between gap-2">
-                      <h3 className="font-display text-base leading-snug text-ink">
-                        {item.title}
-                      </h3>
+                      <div>
+                        <h3 className="font-display text-base leading-snug text-ink">
+                          {item.title}
+                        </h3>
+                        <CartLineOption option={item.option} />
+                      </div>
                       <div className="flex items-center justify-between gap-2">
                         <Price money={item.price} />
                         <button
@@ -186,14 +229,7 @@ export function CartDrawer() {
 
             {items.length > 0 && (
               <div className="border-t border-line px-6 py-5">
-                {error && (
-                  <p
-                    role="alert"
-                    className="mb-4 border border-ink/25 bg-bone-sunk px-4 py-3 font-mono text-xs leading-relaxed text-ink"
-                  >
-                    {error}
-                  </p>
-                )}
+                {errorNotice}
                 <div className="mb-4 flex items-center justify-between font-mono text-sm">
                   <span className="uppercase tracking-[0.1em] text-graphite">
                     {t("subtotal")}

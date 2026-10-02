@@ -1,3 +1,8 @@
+import {
+  resolveProductOptions,
+  type RawOptionDefaults,
+  type RawOptionSource,
+} from "../options";
 import { toAvailability, toMoney } from "../transforms";
 import type {
   Availability,
@@ -48,7 +53,10 @@ interface RawProductSummary {
   categorySlug: string | null;
 }
 
-interface RawProduct {
+// `purchaseOption` / `ringSizes` / `chainLengths` are the piece's own option
+// fields; `optionDefaults` is the "siteSettings" singleton's lists, projected
+// in the same query (null when that document does not exist yet).
+interface RawProduct extends RawOptionSource {
   handle: string;
   title: string;
   description: string;
@@ -56,6 +64,7 @@ interface RawProduct {
   status: string;
   media: (RawMediaItem | null)[];
   category: RawCategory | null;
+  optionDefaults: RawOptionDefaults | null;
 }
 
 interface RawAvailability {
@@ -122,6 +131,7 @@ function toProduct(raw: RawProduct): Product {
     cover: media[0] ?? null,
     media,
     category: toCategory(raw.category),
+    options: resolveProductOptions(raw, raw.optionDefaults),
   };
 }
 

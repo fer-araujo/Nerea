@@ -21,6 +21,19 @@ export const MEDIA_ITEM_PROJECTION = `{
   "url": asset->url
 }`;
 
+// Purchase options (see sanity/schemaTypes/product.ts + siteSettings.ts). The
+// piece's own override lists AND the site-wide defaults are projected raw, in
+// ONE round trip, and resolved in TypeScript (lib/commerce/options.ts
+// `resolveProductOptions`) — keeping the "override -> settings -> built-in"
+// rule in a single unit-tested place instead of split across GROQ and code.
+// `extraPrice` coalesces to 0 (centavos): a missing surcharge means "no extra".
+// The "siteSettings" id is a fixed literal, same as lib/site-settings/queries.ts
+// — not user input, so nothing here is string-built from a parameter.
+const CHAIN_LENGTH_PROJECTION = `{
+    "lengthCm": lengthCm,
+    "extraPrice": coalesce(extraPrice, 0)
+  }`;
+
 export const PRODUCTS_LIST_QUERY = `
 *[_type == "product"] | order(_createdAt desc) {
   "handle": slug.current,
@@ -43,6 +56,13 @@ export const PRODUCT_BY_HANDLE_QUERY = `
   "category": category->{
     "title": coalesce(title[$locale], title.es, ""),
     "slug": slug.current
+  },
+  "purchaseOption": coalesce(purchaseOption, "none"),
+  "ringSizes": coalesce(ringSizes, []),
+  "chainLengths": coalesce(chainLengths[]${CHAIN_LENGTH_PROJECTION}, []),
+  "optionDefaults": *[_id == "siteSettings"][0] {
+    "ringSizes": coalesce(ringSizes, []),
+    "chainLengths": coalesce(chainLengths[]${CHAIN_LENGTH_PROJECTION}, [])
   }
 }
 `;

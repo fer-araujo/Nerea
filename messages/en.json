@@ -51,7 +51,12 @@
     "notFoundTitle": "This piece isn't here anymore",
     "notFoundBody": "The link may be broken, or the piece was removed from the catalog.",
     "notFoundCta": "Back to the shop",
-    "back": "Back to the shop"
+    "back": "Back to the shop",
+    "ringSizeLegend": "Ring size",
+    "chainLengthLegend": "Chain length",
+    "chainLengthChip": "{cm} cm",
+    "ringSizeHint": "Choose your size to acquire this piece.",
+    "chainLengthHint": "Choose a chain length to acquire this piece."
   },
   "Cart": {
     "title": "Cart",
@@ -66,7 +71,10 @@
     "checkingOut": "Processing…",
     "close": "Close cart",
     "soldNotice": "This piece just sold",
-    "errorRetry": "Payment could not start. Please try again."
+    "errorRetry": "Payment could not start. Please try again.",
+    "optionRingSize": "Size {value}",
+    "optionChainLength": "{cm} cm chain",
+    "invalidOptionNotice": "We removed a piece from your cart because its size or chain length needs to be chosen again. You can do that from the piece's page."
   },
   "Checkout": {
     "successKicker": "Order confirmed",

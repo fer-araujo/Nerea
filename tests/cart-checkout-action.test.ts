@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const getAvailabilityMock = vi.fn();
 const getProductByHandleMock = vi.fn();
 const createCheckoutSessionMock = vi.fn();
+const getShippingFeeMock = vi.fn();
 const redirectMock = vi.fn();
 
 vi.mock("@/lib/commerce", () => ({
@@ -15,6 +16,12 @@ vi.mock("@/lib/commerce", () => ({
     getAvailability: (...args: unknown[]) => getAvailabilityMock(...args),
     getProductByHandle: (...args: unknown[]) => getProductByHandleMock(...args),
   },
+}));
+
+// The shipping fee is read from the site settings (Sanity) — mocked so these
+// tests stay credential-free and can drive free / paid / unreadable fees.
+vi.mock("@/lib/site-settings/adapter", () => ({
+  getShippingFee: (...args: unknown[]) => getShippingFeeMock(...args),
 }));
 
 vi.mock("@/lib/commerce/stripe/checkout", () => ({
@@ -60,10 +67,13 @@ const SERVER_PRODUCT: Product = {
   cover: null,
   media: [],
   description: "",
+  options: { kind: "none" },
 };
 
 beforeEach(() => {
   getProductByHandleMock.mockResolvedValue(SERVER_PRODUCT);
+  // Free shipping by default — only the tests about the fee override this.
+  getShippingFeeMock.mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -124,9 +134,13 @@ describe("checkoutAction — server-side re-pricing", () => {
         // header-based fallback correctly picks "https".
         successUrl: "https://nerea-test.example/es/checkout/success",
         cancelUrl: "https://nerea-test.example/es/shop",
+        shippingFee: 0,
+        locale: "es",
         // Forwarded so the Stripe webhook can map the payment back to
         // Sanity docs (app/api/stripe/webhook/route.ts).
         handles: [LINE.handle],
+        // A piece with no option contributes none.
+        options: [],
       },
     );
     expect(redirectMock).toHaveBeenCalledWith(
@@ -208,6 +222,330 @@ describe("checkoutAction — server-side re-pricing", () => {
       expect(redirectMock).not.toHaveBeenCalled();
     },
   );
+});
+
+// The catalog is the only source of truth for a piece's options AND for the
+// surcharge each one carries. These pin that a client-supplied option is only
+// ever a claim: validated against the catalog, never trusted for its price.
+const RING_PRODUCT: Product = {
+  ...SERVER_PRODUCT,
+  options: { kind: "ringSize", values: ["6", "7", "8"] },
+};
+
+const PENDANT_HANDLE = "dije-oro-amatista";
+const PENDANT_PRODUCT: Product = {
+  ...SERVER_PRODUCT,
+  handle: PENDANT_HANDLE,
+  title: "Dije de oro con amatista",
+  price: { amount: 420000, currency: "MXN" },
+  options: {
+    kind: "chainLength",
+    values: [
+      { lengthCm: 40, extra: 0 },
+      { lengthCm: 50, extra: 15000 },
+    ],
+  },
+};
+
+const PENDANT_LINE: CartLineItem = {
+  handle: PENDANT_HANDLE,
+  title: PENDANT_PRODUCT.title,
+  price: PENDANT_PRODUCT.price,
+  cover: null,
+  quantity: 1,
+  option: { kind: "chainLength", lengthCm: 50 },
+};
+
+describe("checkoutAction — purchase options", () => {
+  beforeEach(() => {
+    getAvailabilityMock.mockImplementation(async (handles: string[]) =>
+      Object.fromEntries(handles.map((handle) => [handle, "available"])),
+    );
+    createCheckoutSessionMock.mockResolvedValue(
+      "https://checkout.stripe.com/c/test_session",
+    );
+  });
+
+  it("rejects a piece that needs a size when the line has none, without creating a session", async () => {
+    getProductByHandleMock.mockResolvedValue(RING_PRODUCT);
+
+    const result = await checkoutAction([LINE], "es");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid-option",
+      handles: [LINE.handle],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, unknown]>([
+    ["an unknown size", { kind: "ringSize", value: "99" }],
+    ["a size the catalog removed", { kind: "ringSize", value: "5" }],
+    ["a non-string size", { kind: "ringSize", value: 7 }],
+    ["a chain option on a ring", { kind: "chainLength", lengthCm: 45 }],
+    ["a malformed option", { kind: "ringSize" }],
+  ])("rejects %s as invalid-option", async (_label, option) => {
+    getProductByHandleMock.mockResolvedValue(RING_PRODUCT);
+
+    // A tampered payload is by definition outside the declared type.
+    const tampered = { ...LINE, option } as unknown as CartLineItem;
+    const result = await checkoutAction([tampered], "es");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid-option",
+      handles: [LINE.handle],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an option sent for a piece that takes none", async () => {
+    getProductByHandleMock.mockResolvedValue(SERVER_PRODUCT);
+
+    const result = await checkoutAction(
+      [{ ...LINE, option: { kind: "ringSize", value: "7" } }],
+      "es",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid-option",
+      handles: [LINE.handle],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("charges the catalog price PLUS the catalog extra, ignoring a client price and a client-claimed extra", async () => {
+    getProductByHandleMock.mockResolvedValue(PENDANT_PRODUCT);
+
+    await checkoutAction(
+      [
+        {
+          ...PENDANT_LINE,
+          price: { amount: 1, currency: "MXN" },
+          // Not part of the type: what a tampered payload could carry.
+          option: {
+            kind: "chainLength",
+            lengthCm: 50,
+            extra: 0,
+            extraPrice: 0,
+          } as CartLineItem["option"],
+        },
+      ],
+      "es",
+    );
+
+    const [lines, session] = createCheckoutSessionMock.mock.calls[0];
+    expect(lines).toEqual([
+      {
+        name: "Dije de oro con amatista — Cadena 50 cm",
+        amount: 420000 + 15000,
+        quantity: 1,
+      },
+    ]);
+    // What reaches Stripe is the validated copy, without the forged fields.
+    expect(session.options).toEqual([
+      {
+        handle: PENDANT_HANDLE,
+        option: { kind: "chainLength", lengthCm: 50 },
+      },
+    ]);
+  });
+
+  it("keeps the base price for a length with no extra", async () => {
+    getProductByHandleMock.mockResolvedValue(PENDANT_PRODUCT);
+
+    await checkoutAction(
+      [{ ...PENDANT_LINE, option: { kind: "chainLength", lengthCm: 40 } }],
+      "es",
+    );
+
+    expect(createCheckoutSessionMock.mock.calls[0][0]).toEqual([
+      {
+        name: "Dije de oro con amatista — Cadena 40 cm",
+        amount: 420000,
+        quantity: 1,
+      },
+    ]);
+  });
+
+  it("names the Stripe line with the option, localized", async () => {
+    getProductByHandleMock.mockResolvedValue(RING_PRODUCT);
+
+    await checkoutAction(
+      [{ ...LINE, option: { kind: "ringSize", value: "7" } }],
+      "en",
+    );
+
+    expect(getProductByHandleMock).toHaveBeenCalledWith(LINE.handle, "en");
+    expect(createCheckoutSessionMock.mock.calls[0][0]).toEqual([
+      {
+        name: `${RING_PRODUCT.title} — Size 7`,
+        amount: RING_PRODUCT.price.amount,
+        quantity: 1,
+      },
+    ]);
+  });
+
+  it("passes only the validated options through, per handle, leaving option-less pieces out", async () => {
+    const byHandle: Record<string, Product> = {
+      [LINE.handle]: RING_PRODUCT,
+      aretes: { ...SERVER_PRODUCT, handle: "aretes" },
+    };
+    getProductByHandleMock.mockImplementation(
+      async (handle: string) => byHandle[handle],
+    );
+
+    await checkoutAction(
+      [
+        { ...LINE, option: { kind: "ringSize", value: "8" } },
+        { ...LINE, handle: "aretes", title: "Aretes" },
+      ],
+      "es",
+    );
+
+    const [lines, session] = createCheckoutSessionMock.mock.calls[0];
+    expect(lines).toHaveLength(2);
+    expect(session.handles).toEqual([LINE.handle, "aretes"]);
+    expect(session.options).toEqual([
+      { handle: LINE.handle, option: { kind: "ringSize", value: "8" } },
+    ]);
+  });
+
+  it("validates the FIRST line's option when a handle is repeated", async () => {
+    getProductByHandleMock.mockResolvedValue(RING_PRODUCT);
+
+    const result = await checkoutAction(
+      [LINE, { ...LINE, option: { kind: "ringSize", value: "7" } }],
+      "es",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid-option",
+      handles: [LINE.handle],
+    });
+  });
+
+  it("reports every piece whose option is invalid, and only those", async () => {
+    const byHandle: Record<string, Product> = {
+      "anillo-a": { ...RING_PRODUCT, handle: "anillo-a" },
+      "anillo-b": { ...RING_PRODUCT, handle: "anillo-b" },
+      "anillo-c": { ...RING_PRODUCT, handle: "anillo-c" },
+    };
+    getProductByHandleMock.mockImplementation(
+      async (handle: string) => byHandle[handle],
+    );
+
+    const result = await checkoutAction(
+      [
+        { ...LINE, handle: "anillo-a", option: { kind: "ringSize", value: "99" } },
+        { ...LINE, handle: "anillo-b" },
+        { ...LINE, handle: "anillo-c", option: { kind: "ringSize", value: "7" } },
+      ],
+      "es",
+    );
+
+    // The valid piece (c) is not reported, so it stays in the client cart.
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid-option",
+      handles: ["anillo-a", "anillo-b"],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a sold piece before an invalid option", async () => {
+    const byHandle: Record<string, Product> = {
+      [LINE.handle]: RING_PRODUCT,
+      vendida: { ...SERVER_PRODUCT, handle: "vendida", availability: "sold" },
+    };
+    getProductByHandleMock.mockImplementation(
+      async (handle: string) => byHandle[handle],
+    );
+
+    const result = await checkoutAction(
+      [LINE, { ...LINE, handle: "vendida" }],
+      "es",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "sold",
+      soldHandles: ["vendida"],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("still blocks a piece whose catalog price is invalid, even with a valid option", async () => {
+    getProductByHandleMock.mockResolvedValue({
+      ...PENDANT_PRODUCT,
+      price: { amount: 0, currency: "MXN" },
+    });
+
+    const result = await checkoutAction([PENDANT_LINE], "es");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "sold",
+      soldHandles: [PENDANT_HANDLE],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkoutAction — shipping fee", () => {
+  beforeEach(() => {
+    getAvailabilityMock.mockResolvedValue({ [LINE.handle]: "available" });
+    createCheckoutSessionMock.mockResolvedValue(
+      "https://checkout.stripe.com/c/test_session",
+    );
+  });
+
+  it("reads the fee from the site settings and passes it to Stripe", async () => {
+    getShippingFeeMock.mockResolvedValue(15000);
+
+    await checkoutAction([LINE], "es");
+
+    expect(getShippingFeeMock).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionMock.mock.calls[0][1]).toMatchObject({
+      shippingFee: 15000,
+      locale: "es",
+    });
+  });
+
+  it("never lets the client pick the fee", async () => {
+    getShippingFeeMock.mockResolvedValue(15000);
+
+    await checkoutAction(
+      [{ ...LINE, shippingFee: 0 } as CartLineItem],
+      "es",
+    );
+
+    expect(createCheckoutSessionMock.mock.calls[0][1].shippingFee).toBe(15000);
+  });
+
+  it("fails closed when the fee cannot be read, instead of defaulting to free shipping", async () => {
+    getShippingFeeMock.mockRejectedValue(new Error("settings unreachable"));
+
+    await expect(checkoutAction([LINE], "es")).resolves.toEqual({
+      ok: false,
+      reason: "checkout-failed",
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("does not read the fee at all when the cart is rejected earlier", async () => {
+    getAvailabilityMock.mockResolvedValue({ [LINE.handle]: "sold" });
+
+    await checkoutAction([LINE], "es");
+
+    expect(getShippingFeeMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("checkoutAction — resolveOrigin", () => {

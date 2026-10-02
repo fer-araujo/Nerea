@@ -3,11 +3,14 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { commerce } from "@/lib/commerce";
+import { formatOptionLabel, validateOption } from "@/lib/commerce/options";
 import {
   createCheckoutSession,
   type CheckoutLineInput,
+  type CheckoutOptionInput,
 } from "@/lib/commerce/stripe/checkout";
 import { getPathname } from "@/i18n/navigation";
+import { getShippingFee } from "@/lib/site-settings/adapter";
 import type { Locale } from "@/lib/commerce/types";
 import type { CartLineItem } from "./cart-context";
 
@@ -16,6 +19,17 @@ export interface CheckoutSoldResult {
   reason: "sold";
   /** Handles that must be dropped from the client cart. */
   soldHandles: string[];
+}
+
+export interface CheckoutInvalidOptionResult {
+  ok: false;
+  reason: "invalid-option";
+  /**
+   * Handles whose chosen ring size / chain length is missing or no longer
+   * valid for the catalog. Like `soldHandles`, the client drops these lines
+   * and asks the shopper to choose the option again.
+   */
+  handles: string[];
 }
 
 export interface CheckoutFailedResult {
@@ -28,7 +42,10 @@ export interface CheckoutFailedResult {
   reason: "checkout-failed";
 }
 
-export type CheckoutActionResult = CheckoutSoldResult | CheckoutFailedResult;
+export type CheckoutActionResult =
+  | CheckoutSoldResult
+  | CheckoutInvalidOptionResult
+  | CheckoutFailedResult;
 
 // Prefers the configured public origin — same env var + trim/strip-trailing-
 // slash convention as lib/seo.ts's getSiteUrl() — so the Stripe success/
@@ -65,13 +82,18 @@ async function resolveOrigin(): Promise<string> {
 //
 // SECURITY: `lines` is client-supplied (a Server Action argument, or a
 // hand-edited localStorage cart — see cart-context.tsx) and is trusted for
-// EXACTLY ONE thing below: which handles were requested. `line.price`,
-// `line.title`, and `line.quantity` are read only for the cart UI
-// (CartDrawer.tsx) and are NEVER read here — every Stripe line item is
+// EXACTLY TWO things below: which handles were requested, and each handle's
+// `option` as a CLAIM that is validated against the catalog's own resolved
+// options (`validateOption`) — only a value that matches is ever used, and
+// what reaches Stripe is the catalog's copy of it, not the client's.
+// `line.price`, `line.title`, and `line.quantity` are read only for the cart
+// UI (CartDrawer.tsx) and are NEVER read here — every Stripe line item is
 // rebuilt from `commerce.getProductByHandle`, the authoritative Sanity
-// catalog, so a tampered client price/quantity can never reach Stripe (and,
-// downstream, can never make the webhook in app/api/stripe/webhook/route.ts
-// mark a real one-of-one piece sold for an attacker-chosen price).
+// catalog (base price + the catalog's extra for the validated option), so a
+// tampered client price/quantity can never reach Stripe (and, downstream, can
+// never make the webhook in app/api/stripe/webhook/route.ts mark a real
+// one-of-one piece sold for an attacker-chosen price). The shipping fee is
+// read from the site settings here too, never from the client.
 export async function checkoutAction(
   lines: CartLineItem[],
   locale: Locale,
@@ -83,6 +105,14 @@ export async function checkoutAction(
     // repeat the same handle more than once — a one-of-one piece must only
     // ever become a single Stripe line item.
     const handles = [...new Set(lines.map((line) => line.handle))];
+    // For a repeated handle the FIRST line's option is the one that is
+    // validated, so the outcome is deterministic whatever the client sends.
+    const claimedOptions = new Map<string, unknown>();
+    for (const line of lines) {
+      if (!claimedOptions.has(line.handle)) {
+        claimedOptions.set(line.handle, line.option);
+      }
+    }
     const availability = await commerce.getAvailability(handles);
     const soldHandles = handles.filter(
       (handle) => availability[handle] !== "available",
@@ -100,7 +130,9 @@ export async function checkoutAction(
     // the race window between that check and the Stripe session this fetch
     // feeds — an unknown handle is treated exactly like a sold one.
     const unavailableHandles: string[] = [];
+    const invalidOptionHandles: string[] = [];
     const checkoutLines: CheckoutLineInput[] = [];
+    const checkoutOptions: CheckoutOptionInput[] = [];
 
     for (const handle of handles) {
       const product = await commerce.getProductByHandle(handle, locale);
@@ -116,27 +148,65 @@ export async function checkoutAction(
         unavailableHandles.push(handle);
         continue;
       }
+
+      // A required option that is missing, a value the catalog does not
+      // offer (tampered, or since removed in Studio) and an option on a piece
+      // that takes none are all the same outcome: the shopper must choose
+      // again. `check.extra` is the CATALOG's surcharge — already proven to
+      // be a non-negative integer — so the unit amount below stays a
+      // positive integer.
+      const check = validateOption(product.options, claimedOptions.get(handle));
+      if (!check.valid) {
+        invalidOptionHandles.push(handle);
+        continue;
+      }
+
       checkoutLines.push({
-        name: product.title,
-        amount: product.price.amount,
+        name: check.option
+          ? `${product.title} — ${formatOptionLabel(check.option, locale)}`
+          : product.title,
+        amount: product.price.amount + check.extra,
         // One-of-one pieces: always exactly 1, regardless of what the
         // client's `line.quantity` says — see the SECURITY note above.
         quantity: 1,
       });
+      if (check.option) {
+        checkoutOptions.push({ handle, option: check.option });
+      }
     }
 
+    // Sold wins over invalid-option: a piece that is gone cannot be fixed by
+    // choosing again. Any invalid options are reported on the next attempt,
+    // once the shopper has dropped the sold lines.
     if (unavailableHandles.length > 0) {
       return { ok: false, reason: "sold", soldHandles: unavailableHandles };
     }
 
-    const origin = await resolveOrigin();
+    if (invalidOptionHandles.length > 0) {
+      return {
+        ok: false,
+        reason: "invalid-option",
+        handles: invalidOptionHandles,
+      };
+    }
+
+    // Independent reads, so they run together. A failed fee read throws into
+    // the catch below (checkout-failed) instead of defaulting to free shipping.
+    const [origin, shippingFee] = await Promise.all([
+      resolveOrigin(),
+      getShippingFee(),
+    ]);
     redirectUrl = await createCheckoutSession(checkoutLines, {
       successUrl: `${origin}${getPathname({ href: "/checkout/success", locale })}`,
       cancelUrl: `${origin}${getPathname({ href: "/shop", locale })}`,
+      shippingFee,
+      locale,
       // Server-validated handles only — lets the Stripe webhook
       // (app/api/stripe/webhook/route.ts) map the completed payment back to
       // these Sanity product documents.
       handles,
+      // Catalog-validated options only (empty for pieces without one).
+      options: checkoutOptions,
     });
   } catch {
     // Never leak the raw error (could echo request/config details); never

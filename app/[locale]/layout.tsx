@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Fraunces, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
 import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
@@ -10,34 +9,10 @@ import { CartProvider } from "@/lib/cart/cart-context";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { CartDrawer } from "@/components/layout/CartDrawer";
-import "./globals.css";
+import { fontVariables } from "../fonts";
+import "../globals.css";
 
 export { generateStaticParams } from "@/i18n/routing";
-
-// Display — Fraunces (optical, warm serif). Brief-mandated: the client named a
-// serif for the atelier/gallery identity, so the usual "no default serif" guard
-// doesn't apply here. `opsz` axis lets headings pick up optical warmth.
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  axes: ["opsz"],
-  variable: "--font-fraunces",
-  display: "swap",
-});
-
-// Body / UI — Space Grotesk. A clean grotesque with more architectural
-// character than Inter; carries the MCM "precision" side of the synthesis.
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-grotesk",
-  display: "swap",
-});
-
-// Data — JetBrains Mono. Drives the signature spec-plates and prices.
-const jetBrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains",
-  display: "swap",
-});
 
 // Site-wide defaults only: `metadataBase` (so every relative/absolute URL
 // built in per-route `generateMetadata` resolves correctly, task 5.1) and a
@@ -101,7 +76,7 @@ export default async function LocaleLayout({
   return (
     <html
       lang={locale}
-      className={`${fraunces.variable} ${spaceGrotesk.variable} ${jetBrainsMono.variable} h-full antialiased`}
+      className={`${fontVariables} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <NextIntlClientProvider locale={locale} messages={messages}>

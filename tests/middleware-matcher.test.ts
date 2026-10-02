@@ -6,7 +6,8 @@ import { MIDDLEWARE_MATCHER } from "../middleware";
 // the matcher itself — see tests/locale-routing.test.ts for behavior of the
 // middleware function body instead. This test checks the matcher pattern in
 // isolation, confirming it excludes API routes, Next internals, the embedded
-// Sanity Studio, and file-like paths while matching normal app routes.
+// Sanity Studio, the admin panel, and file-like paths while matching normal
+// app routes.
 const matcherRegex = new RegExp(`^${MIDDLEWARE_MATCHER}$`);
 
 describe("middleware matcher pattern", () => {
@@ -18,11 +19,21 @@ describe("middleware matcher pattern", () => {
     "/favicon.ico",
     "/studio",
     "/studio/desk/product",
+    "/admin",
+    "/admin/login",
+    "/admin/mensajes",
   ])("excludes %s", (pathname) => {
     expect(matcherRegex.test(pathname)).toBe(false);
   });
 
-  it.each(["/", "/en", "/shop", "/es/products/ring"])("matches %s", (pathname) => {
+  it.each([
+    "/",
+    "/en",
+    "/shop",
+    "/es/products/ring",
+    "/es/contact",
+    "/en/about",
+  ])("matches %s", (pathname) => {
     expect(matcherRegex.test(pathname)).toBe(true);
   });
 });

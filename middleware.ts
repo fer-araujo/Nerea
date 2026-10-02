@@ -4,12 +4,17 @@ import { routing } from "./i18n/routing";
 // Next.js compiles this pattern into the routing layer that decides whether
 // middleware runs at all — it excludes API routes, Next's internal assets
 // (_next, _vercel), the embedded Sanity Studio (/studio — intentionally not
-// locale-routed, see app/studio/), and any path containing a file extension
-// (e.g. /favicon.ico). This exclusion happens BEFORE middleware() is
-// invoked, so it cannot be verified by calling middleware() directly in a
+// locale-routed, see app/studio/), the admin panel (/admin — Spanish-only and
+// not locale-routed, see app/admin/; if the locale middleware ran on it, it
+// would rewrite /admin to /es/admin and 404), and any path containing a file
+// extension (e.g. /favicon.ico). This exclusion happens BEFORE middleware()
+// is invoked, so it cannot be verified by calling middleware() directly in a
 // test; see tests/middleware-matcher.test.ts, which checks this pattern in
-// isolation.
-export const MIDDLEWARE_MATCHER = "/((?!api|_next|_vercel|studio|.*\\..*).*)";
+// isolation. Admin authentication deliberately does NOT live in middleware
+// (it runs on the Edge, where firebase-admin cannot): requireAdmin() in
+// lib/admin/auth/session.ts guards the admin layout, pages and actions.
+export const MIDDLEWARE_MATCHER =
+  "/((?!api|_next|_vercel|studio|admin|.*\\..*).*)";
 
 export default createMiddleware(routing);
 
@@ -18,5 +23,5 @@ export default createMiddleware(routing);
 // identifier, even though `MIDDLEWARE_MATCHER` above holds the exact same
 // literal. Keep this string in sync with `MIDDLEWARE_MATCHER`.
 export const config = {
-  matcher: ["/((?!api|_next|_vercel|studio|.*\\..*).*)"],
+  matcher: ["/((?!api|_next|_vercel|studio|admin|.*\\..*).*)"],
 };

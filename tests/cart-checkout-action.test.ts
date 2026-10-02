@@ -74,11 +74,42 @@ beforeEach(() => {
   getProductByHandleMock.mockResolvedValue(SERVER_PRODUCT);
   // Free shipping by default — only the tests about the fee override this.
   getShippingFeeMock.mockResolvedValue(0);
+  // Payments are on by default: the action refuses outright without a Stripe
+  // key. Placeholder only — the Stripe module itself is mocked here.
+  process.env.STRIPE_SECRET_KEY = "sk_test_dummy";
 });
 
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
   vi.clearAllMocks();
+});
+
+describe("checkoutAction — payments gate", () => {
+  // A Server Action is a public endpoint, so the gate cannot live only in the
+  // drawer: with no key the action must stop before it reads Sanity or builds
+  // a Stripe session.
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+  ])(
+    "refuses with payments-disabled, touching nothing, when the Stripe key is %s",
+    async (_label, key) => {
+      if (key === undefined) {
+        delete process.env.STRIPE_SECRET_KEY;
+      } else {
+        process.env.STRIPE_SECRET_KEY = key;
+      }
+
+      const result = await checkoutAction([LINE], "es");
+
+      expect(result).toEqual({ ok: false, reason: "payments-disabled" });
+      expect(getAvailabilityMock).not.toHaveBeenCalled();
+      expect(getProductByHandleMock).not.toHaveBeenCalled();
+      expect(getShippingFeeMock).not.toHaveBeenCalled();
+      expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+      expect(redirectMock).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("checkoutAction — sold guard", () => {

@@ -15,6 +15,10 @@ export const revalidate = 60;
 // excluded — see app/robots.ts, which also disallows crawling them.
 const STATIC_PATHNAMES = ["", "/shop", "/about", "/contact"];
 
+// The legal pages (privacy notice, purchase terms, shipping and returns):
+// worth being findable, never a landing target, so they rank below the rest.
+const LEGAL_PATHNAMES = ["/privacidad", "/terminos", "/envios"];
+
 function toEntry(
   pathname: string,
   locale: Locale,
@@ -30,11 +34,12 @@ function toEntry(
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const staticEntries = routing.locales.flatMap((locale) =>
-    STATIC_PATHNAMES.map((pathname) =>
+  const staticEntries = routing.locales.flatMap((locale) => [
+    ...STATIC_PATHNAMES.map((pathname) =>
       toEntry(pathname, locale, pathname === "" ? 1 : 0.8),
     ),
-  );
+    ...LEGAL_PATHNAMES.map((pathname) => toEntry(pathname, locale, 0.3)),
+  ]);
 
   // Handles are language-neutral (design.md's Sanity schema: "slug
   // (language-neutral)"), so one fetch enumerates every product URL for

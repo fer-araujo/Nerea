@@ -29,7 +29,7 @@ sandbox blocks writing any `.env*` file outright; rename it locally to
 | `COMMERCE_SOURCE` | server-only | `sanity` (default — live catalog) or `fixtures` (no credentials required; dev/test-only, e.g. `COMMERCE_SOURCE=fixtures`). |
 | `NEXT_PUBLIC_SANITY_PROJECT_ID` / `NEXT_PUBLIC_SANITY_DATASET` | public | Sanity project identifiers; fall back to the real project's values in `sanity/env.ts` when unset. |
 | `NEXT_PUBLIC_SITE_URL` | public | Used for `metadataBase`, canonical/hreflang URLs, and the sitemap/robots routes; falls back to `http://localhost:3000` when unset. |
-| `STRIPE_SECRET_KEY` | server-only | Stripe test-mode key for Checkout Sessions; never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the key) when unset. |
+| `STRIPE_SECRET_KEY` | server-only | Stripe key for Checkout Sessions (`sk_test_…` while testing, `sk_live_…` at launch); never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the key) when unset. **It is also the payments switch:** while it is unset the cart offers "Apartar por mensaje" (a link to the contact form) instead of the checkout button, and the checkout Server Action refuses before reading Sanity. Set it and redeploy to turn payments on. |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | public | Stripe publishable key. |
 | `STRIPE_WEBHOOK_SECRET` | server-only | Signing secret for the `checkout.session.completed` webhook (`app/api/stripe/webhook/route.ts`) that marks a purchased piece sold; never prefix `NEXT_PUBLIC_`. Unset or invalid signatures fail closed (400, nothing processed). |
 | `SANITY_WRITE_TOKEN` | server-only | Write-capable token used by the Stripe webhook to mark a purchased piece `sold`; never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the token) when unset. |
@@ -79,20 +79,127 @@ Sessions last 5 days (httpOnly, `SameSite=Strict` cookie scoped to `/admin`,
 revocation-checked on every request). Signing out revokes the user's Firebase
 refresh tokens, which ends the session on every device.
 
-## Testing
+## Testing and CI
 
 ```bash
-npm run test
+npx tsc --noEmit
+npm run lint
+npm test
+npm run build
 ```
 
 Vitest is configured for targeted unit tests only (see `design.md`'s Testing
 Strategy) — no broader test framework is set up beyond what each day's tasks
-need.
+need. GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
+runs the four commands above, in that order, on Node 22, for every pull request
+and every push to `main`. It needs no secrets: the build works with no
+environment variables at all, because every integration (Stripe, Firebase, the
+Sanity write token) fails safe when its key is missing.
 
-## Deployment (Vercel)
+## Legal pages (draft)
 
-TODO (manual, client-owned step — requires the client's Vercel account):
-connect this GitHub repo to a Vercel project via the Vercel dashboard so that
-feature-branch pushes generate preview deployments and `main` stays untouched
-until an approved PR merge. No `vercel` CLI login/deploy was run from this
-environment.
+`/privacidad` (Aviso de privacidad), `/terminos` (Términos de compra) and
+`/envios` (Envíos y devoluciones) exist in both languages, are linked from the
+footer and are listed in the sitemap. The copy is a **draft** for a one-person
+Mexican jewelry business. It lives in `messages/es.json` and `messages/en.json`
+under `Legal`, as plain text (never HTML). The facts that are not known yet are
+the bracketed values in `Legal.values` (`[NOMBRE DE LA RESPONSABLE]`,
+`[DOMICILIO]`, `[CORREO DE CONTACTO]`, `[TELÉFONO DE CONTACTO]`,
+`[PLAZO DE ENTREGA]`, …): replace each one, once per language. While any
+bracketed placeholder remains, the page shows a "Borrador pendiente de revisión"
+note, and the note disappears by itself after the last one is replaced. The
+jeweler, ideally with a lawyer, should approve the wording before launch.
+
+## Launch checklist (Netlify runbook)
+
+The storefront runs on **Netlify** (Free plan: commercial use is allowed) and
+the Studio on **Sanity hosting**, so the jeweler's day-to-day editing never uses
+storefront credits. Do the steps in order; the ones marked *(jeweler)* are hers.
+
+### 1. Create the Netlify site and set its environment
+
+Netlify > Add new site > Import an existing project > this GitHub repo, branch
+`main`. Netlify detects Next.js; there is no `netlify.toml`. Then Site
+configuration > Environment variables:
+
+| Variable | Value |
+|---|---|
+| `NODE_VERSION` | `22` |
+| `NEXT_PUBLIC_SITE_URL` | The public URL, with protocol and no trailing slash (the `*.netlify.app` URL until a domain is connected). Canonical URLs, the sitemap and the Stripe redirects derive from it. |
+| `SANITY_WRITE_TOKEN` | Editor token from sanity.io/manage > API > Tokens; the Stripe webhook uses it to mark a purchased piece sold. |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Service account from the Firebase setup above (the key on one line, with literal `\n`). |
+| `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Firebase web app config. |
+| `ADMIN_EMAILS` | Comma-separated emails allowed into `/admin`. |
+| `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | Leave unset until step 6: the cart shows the payments gate meanwhile. |
+
+Leave `COMMERCE_SOURCE` unset (the live catalog is the default). A variable only
+reaches a new build, so redeploy after changing any of them (`NEXT_PUBLIC_*`
+values are inlined at build time). The contact form's rate limiter detects
+Netlify at build time and reads `x-nf-client-connection-ip`; there is nothing to
+configure. Every production deploy uses Netlify credits, so batch merges to
+`main`.
+
+### 2. Sanity CORS
+
+sanity.io/manage > the project > API > CORS origins > add the Netlify URL (and
+the custom domain later) with **Allow credentials**. It is only needed for the
+embedded `/studio` on the live site; keep `http://localhost:3000` for local
+development.
+
+### 3. Firestore rules
+
+Firebase console > Firestore Database > Rules: paste
+[`firestore.rules`](firestore.rules) and publish (step 4 of the Firebase setup
+above, if not done yet).
+
+### 4. Deploy Studio to Sanity hosting (you run these)
+
+```bash
+npx sanity login     # once per machine; opens the browser
+npx sanity deploy    # builds the Studio and publishes it
+```
+
+The hostname comes from `studioHost` in [`sanity.cli.ts`](sanity.cli.ts), so the
+Studio is published at https://nerea.sanity.studio (if the name is taken the CLI
+asks for another one: update `studioHost` to match). Add the jeweler under
+sanity.io/manage > Members. The hosted Studio needs **no CORS entry**, and the
+embedded `/studio` route keeps working locally (`npm run dev`, then
+http://localhost:3000/studio). Re-run `npx sanity deploy` after a schema change;
+content edits never need it. The first deploy prints an app ID, which can be
+pinned as `deployment.appId` in `sanity.cli.ts`.
+
+### 5. Content *(jeweler)*
+
+- In Studio, per piece: **Opción de compra** (ninguna, talla de anillo or largo
+  de cadena). In **Ajustes del sitio**: **Costo de envío** (in centavos:
+  `15000` is $150.00 MXN, `0` is free shipping).
+- Legal pages: fill in the bracketed placeholders and approve the wording (see
+  "Legal pages (draft)" above). They live in the `messages` files, not in Studio.
+
+### 6. Stripe go-live
+
+1. Finish activating the Stripe account (business details, bank account).
+2. Netlify: set `STRIPE_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
+3. Stripe Dashboard > Developers > Webhooks > Add endpoint:
+   `https://<your-site>/api/stripe/webhook`, event `checkout.session.completed`.
+   Copy its signing secret into `STRIPE_WEBHOOK_SECRET`. Test and live mode have
+   separate keys and separate endpoints: create the endpoint in the same mode as
+   the keys.
+4. **Redeploy.** The payments gate lifts when the build sees
+   `STRIPE_SECRET_KEY`.
+5. Test purchase: first with test keys (card `4242 4242 4242 4242`). Stripe asks
+   for the shipping address and phone, the success page shows, and the webhook
+   flips the piece to **Vendida** in Studio. Then switch to the live keys and
+   webhook secret, redeploy, buy one real piece and refund it from the Dashboard.
+
+## Dependency notes
+
+Next.js is pinned exactly (`next` and `eslint-config-next` share a version).
+`package.json` carries one `overrides` entry, `@grpc/grpc-js` `^1.13.6`:
+`firebase` pulls `@firebase/firestore`, which pins a vulnerable 1.9.x, and the
+storefront only ever loads `firebase/auth` in the browser, so the override just
+keeps that unused copy off the advisory list. What `npm audit --omit=dev` still
+reports lives inside Sanity's own CLI and build tooling (`adm-zip`, `js-yaml`,
+`smol-toml` and `undici`, all behind `sanity`): the only fix npm offers is a
+downgrade to `sanity@5.14.1`, so those wait for upstream releases. Run
+`npm audit --omit=dev` again before launch.

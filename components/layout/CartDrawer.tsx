@@ -35,14 +35,22 @@ function CartLineOption({ option }: { option: CartLineItem["option"] }) {
   ) : null;
 }
 
+// The checkout button and the "reserve by message" link share one look: both
+// are THE primary action of the drawer's footer, only one is ever shown.
+const PRIMARY_ACTION_CLASS =
+  "flex w-full items-center justify-center border border-ink bg-ink px-6 py-3 font-sans text-sm text-bone transition-colors duration-200 hover:border-brass-deep hover:bg-brass-deep";
+
 // Slide-over cart. Opens on add (CartProvider.addItem sets isOpen), lists
 // line items with a remove control, and hands off to the Stripe Checkout
-// Server Action. Reduced-motion is handled globally by MotionProvider's
-// `MotionConfig reducedMotion="user"` (transform animations are stripped
-// automatically) — unlike Reveal.tsx, this drawer never needs to render
-// without JS (it's interaction-only, mounted client-side from the first
-// "add to cart" click), so it doesn't need Reveal's extra manual branch.
-export function CartDrawer() {
+// Server Action. While online payments are off (`paymentsEnabled` false: no
+// Stripe key yet) the footer keeps the subtotal but offers a message to the
+// atelier instead of the checkout button. Reduced-motion is handled globally
+// by MotionProvider's `MotionConfig reducedMotion="user"` (transform
+// animations are stripped automatically) — unlike Reveal.tsx, this drawer
+// never needs to render without JS (it's interaction-only, mounted
+// client-side from the first "add to cart" click), so it doesn't need
+// Reveal's extra manual branch.
+export function CartDrawer({ paymentsEnabled }: { paymentsEnabled: boolean }) {
   // `Cart` copy (empty state, errors, checkout CTA) is assistant-drafted —
   // DRAFT PENDING ARTISAN REVIEW, same status as `About`/`Contact` (task
   // 5.5 content checklist). Also consumed by CartTrigger.tsx.
@@ -55,6 +63,11 @@ export function CartDrawer() {
   const { items, isOpen, close, removeItem, removeItems } = useCart();
   const [status, setStatus] = useState<"idle" | "pending">("idle");
   const [error, setError] = useState<string | null>(null);
+  // The server can refuse with "payments-disabled" even though this page was
+  // built with payments on (the key was removed after the build). From then on
+  // the drawer behaves exactly as if the page had been built with them off.
+  const [paymentsRefused, setPaymentsRefused] = useState(false);
+  const paymentsOff = !paymentsEnabled || paymentsRefused;
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -85,7 +98,11 @@ export function CartDrawer() {
     const result = await checkoutAction(items, locale);
     // A successful checkoutAction() never returns — it redirects. Reaching
     // this line always means one of the error branches happened.
-    if (result.reason === "sold") {
+    if (result.reason === "payments-disabled") {
+      // The cart stays as it is; the footer swaps to the "reserve by message"
+      // note, so no error banner is needed on top of it.
+      setPaymentsRefused(true);
+    } else if (result.reason === "sold") {
       removeItems(result.soldHandles);
       setError(t("soldNotice"));
     } else if (result.reason === "invalid-option") {
@@ -236,18 +253,32 @@ export function CartDrawer() {
                   </span>
                   <Price money={subtotal} className="text-base" />
                 </div>
-                <button
-                  type="button"
-                  onClick={handleCheckout}
-                  disabled={status === "pending"}
-                  className={cn(
-                    "flex w-full items-center justify-center border border-ink bg-ink px-6 py-3 font-sans text-sm text-bone transition-colors duration-200",
-                    "hover:border-brass-deep hover:bg-brass-deep",
-                    "disabled:cursor-not-allowed disabled:opacity-60",
-                  )}
-                >
-                  {status === "pending" ? t("checkingOut") : t("checkout")}
-                </button>
+                {paymentsOff ? (
+                  <>
+                    <p className="mb-4 text-sm leading-relaxed text-graphite">
+                      {t("paymentsSoon")}
+                    </p>
+                    <Link
+                      href="/contact"
+                      onClick={handleClose}
+                      className={PRIMARY_ACTION_CLASS}
+                    >
+                      {t("reserveCta")}
+                    </Link>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCheckout}
+                    disabled={status === "pending"}
+                    className={cn(
+                      PRIMARY_ACTION_CLASS,
+                      "disabled:cursor-not-allowed disabled:opacity-60",
+                    )}
+                  >
+                    {status === "pending" ? t("checkingOut") : t("checkout")}
+                  </button>
+                )}
               </div>
             )}
           </m.aside>

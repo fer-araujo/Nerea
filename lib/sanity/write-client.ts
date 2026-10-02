@@ -1,12 +1,13 @@
 import { createClient, type SanityClient } from "@sanity/client";
 import { apiVersion, dataset, projectId } from "@/sanity/env";
 
-// Server-only, write-capable Sanity client shared by every write path in
-// this app — currently lib/contact/submit.ts (contact messages) and
-// lib/commerce/sanity/mark-sold.ts (the Stripe webhook marking a purchased
-// piece sold). Originally lived under lib/contact/ before the webhook
-// needed the same capability; moved here so a commerce-layer module never
-// has to reach into an unrelated feature folder for shared infra.
+// Server-only, write-capable Sanity client for the app's Sanity write paths —
+// currently only lib/commerce/sanity/mark-sold.ts (the Stripe webhook marking
+// a purchased piece sold). Contact messages no longer go through here: they
+// moved to Firestore (lib/admin/data/contact-messages.ts) because a Sanity
+// dataset is public-read. Kept under lib/sanity/ (it originally lived under
+// lib/contact/) so a commerce-layer module never has to reach into an
+// unrelated feature folder for shared infra.
 //
 // Constructed LAZILY, only on first use, never at module import time — a
 // missing SANITY_WRITE_TOKEN (e.g. `next build` with no real token, or

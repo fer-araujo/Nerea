@@ -1,0 +1,15 @@
+rules_version = '2';
+
+// Deny EVERY client read and write, on every collection, for everyone —
+// including signed-in users. The Firebase Admin SDK on the server (see
+// lib/admin/firebase/admin.ts) is the only accessor: it authenticates with a
+// service account, which bypasses these rules by design, so the app keeps
+// working while the browser (and anyone holding the public web API key) can
+// reach nothing. Paste this file into Firestore > Rules and publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

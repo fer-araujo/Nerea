@@ -3,7 +3,7 @@ import { OG_IMAGE_SIZE } from "@/lib/seo";
 
 // Default brand OG/Twitter card image, shared across every route today (see
 // lib/seo.ts — OG_IMAGE_PATH / buildPageMetadata). Rendered from the same
-// design tokens as the rest of the site (app/[locale]/globals.css) instead
+// design tokens as the rest of the site (app/globals.css) instead
 // of a hand-exported asset, because the real logo is still a PLACEHOLDER
 // (components/brand/Logo.tsx — no vector file exists yet) and this route
 // can't reuse it as-is (it's a React component tree meant for the DOM, not

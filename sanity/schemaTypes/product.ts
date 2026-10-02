@@ -1,4 +1,5 @@
 import { defineField, defineType } from "sanity";
+import { DEFAULT_RING_SIZES } from "../../lib/commerce/options";
 
 // One document per physical piece (one-of-one model, see design.md ADR-2 /
 // Commerce Data Layer). Title/description are field-level bilingual objects
@@ -99,6 +100,49 @@ export const product = defineType({
           initialValue: "MXN",
         }),
       ],
+    }),
+    // What the shopper must pick before paying. The two lists below are
+    // OPTIONAL per-piece overrides: left empty, the storefront uses the
+    // defaults in "Ajustes del sitio" (and, failing that, built-in ones) —
+    // see lib/commerce/options.ts for the resolution order.
+    defineField({
+      name: "purchaseOption",
+      title: "Opción de compra",
+      description:
+        "Lo que debe elegir quien compra antes de pagar. Los anillos piden talla; los dijes con cadena piden el largo.",
+      type: "string",
+      options: {
+        list: [
+          { title: "Ninguna", value: "none" },
+          { title: "Talla de anillo", value: "ringSize" },
+          { title: "Largo de cadena", value: "chainLength" },
+        ],
+        layout: "radio",
+      },
+      initialValue: "none",
+    }),
+    defineField({
+      name: "ringSizes",
+      title: "Tallas disponibles (opcional)",
+      description:
+        'Marca solo las tallas que ofreces en esta pieza. Si lo dejas vacío, se usan las tallas de "Ajustes del sitio".',
+      type: "array",
+      of: [{ type: "string" }],
+      options: {
+        list: DEFAULT_RING_SIZES.map((size) => ({ title: size, value: size })),
+        layout: "grid",
+      },
+      validation: (rule) => rule.unique(),
+      hidden: ({ document }) => document?.purchaseOption !== "ringSize",
+    }),
+    defineField({
+      name: "chainLengths",
+      title: "Largos de cadena disponibles (opcional)",
+      description:
+        'Largos que ofreces en esta pieza, cada uno con su costo extra. Si lo dejas vacío, se usan los largos de "Ajustes del sitio".',
+      type: "array",
+      of: [{ type: "chainLengthOption" }],
+      hidden: ({ document }) => document?.purchaseOption !== "chainLength",
     }),
     defineField({
       name: "status",

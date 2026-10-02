@@ -11,7 +11,7 @@ import { Price } from "@/components/ui/Price";
 import { Badge } from "@/components/ui/Badge";
 import { ProductGallery } from "@/components/product/ProductGallery";
 import { AvailabilityBadge } from "@/components/product/AvailabilityBadge";
-import { AcquireButton } from "@/components/product/AcquireButton";
+import { PurchasePanel } from "@/components/product/PurchasePanel";
 
 // Nested dynamic segments, following Next's documented contract: the parent
 // `[locale]` layout's generateStaticParams runs first, then this one is
@@ -156,10 +156,19 @@ export default async function ProductDetailPage({
             className="border-t border-line pt-4"
           />
 
+          {/* Pick only the fields the client panel needs: the whole `product`
+              (gallery media, description) would otherwise be serialized into
+              the client payload for nothing. */}
           {!isSold && (
-            <AcquireButton
+            <PurchasePanel
               label={t("acquireCta")}
-              product={product}
+              product={{
+                handle: product.handle,
+                title: product.title,
+                price: product.price,
+                cover: product.cover,
+                options: product.options,
+              }}
               className="mt-2"
             />
           )}

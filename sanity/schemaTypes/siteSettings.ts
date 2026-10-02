@@ -1,4 +1,5 @@
 import { defineField, defineType } from "sanity";
+import { DEFAULT_RING_SIZES } from "../../lib/commerce/options";
 
 // Site-wide branding singleton — see sanity.config.ts's Studio structure for
 // the singleton guard (a fixed document ID "siteSettings", with create/
@@ -48,6 +49,44 @@ export const siteSettings = defineType({
         defineField({ name: "es", title: "Español", type: "string" }),
         defineField({ name: "en", title: "English", type: "string" }),
       ],
+    }),
+    // Commerce defaults, edited once here instead of per piece. A piece can
+    // still carry its own list (see sanity/schemaTypes/product.ts); the
+    // storefront falls back to built-in values when these are left empty.
+    defineField({
+      name: "ringSizes",
+      title: "Tallas de anillo (predeterminadas)",
+      description:
+        "Tallas que se ofrecen en las piezas con opción de talla de anillo, salvo que la pieza tenga su propia lista. Si se deja vacío, se ofrecen de la 4 a la 13 en medias tallas.",
+      type: "array",
+      of: [{ type: "string" }],
+      options: {
+        list: DEFAULT_RING_SIZES.map((size) => ({ title: size, value: size })),
+        layout: "grid",
+      },
+      validation: (rule) => rule.unique(),
+    }),
+    defineField({
+      name: "chainLengths",
+      title: "Largos de cadena (predeterminados)",
+      description:
+        "Largos que se ofrecen en las piezas con opción de largo de cadena, salvo que la pieza tenga su propia lista. El costo extra se suma al precio de la pieza. Si se deja vacío, se ofrecen 40, 45 y 50 cm sin costo extra.",
+      type: "array",
+      of: [{ type: "chainLengthOption" }],
+    }),
+    // Same unit and input convention as `product.price.amount`: centavos, no
+    // decimals. Read server-side only, by checkoutAction (never the client).
+    // The 100000 ($1,000.00 MXN) ceiling is a typo guard for a flat domestic
+    // rate (an extra zero would otherwise charge every order 10x), not a
+    // business rule.
+    defineField({
+      name: "shippingFee",
+      title: "Costo de envío (en centavos, sin decimales)",
+      description:
+        "Tarifa fija de envío dentro de México. Ejemplo: $150.00 MXN se escribe como 15000. Usa 0 (o déjalo vacío) para ofrecer envío gratis. Máximo: $1,000.00 MXN (100000).",
+      type: "number",
+      initialValue: 0,
+      validation: (rule) => rule.integer().min(0).max(100000),
     }),
   ],
   preview: {

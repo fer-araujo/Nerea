@@ -51,7 +51,12 @@
     "notFoundTitle": "Esta pieza ya no está aquí",
     "notFoundBody": "El enlace puede estar roto o la pieza fue retirada del catálogo.",
     "notFoundCta": "Volver a la tienda",
-    "back": "Volver a la tienda"
+    "back": "Volver a la tienda",
+    "ringSizeLegend": "Talla de anillo",
+    "chainLengthLegend": "Largo de cadena",
+    "chainLengthChip": "{cm} cm",
+    "ringSizeHint": "Elige tu talla para poder adquirir esta pieza.",
+    "chainLengthHint": "Elige el largo de la cadena para poder adquirir esta pieza."
   },
   "Cart": {
     "title": "Carrito",
@@ -66,7 +71,10 @@
     "checkingOut": "Procesando…",
     "close": "Cerrar carrito",
     "soldNotice": "Esta pieza acaba de venderse",
-    "errorRetry": "No se pudo iniciar el pago. Intenta de nuevo."
+    "errorRetry": "No se pudo iniciar el pago. Intenta de nuevo.",
+    "optionRingSize": "Talla {value}",
+    "optionChainLength": "Cadena {cm} cm",
+    "invalidOptionNotice": "Quitamos una pieza del carrito porque hay que elegir de nuevo su talla o largo de cadena. Hazlo desde la página de la pieza."
   },
   "Checkout": {
     "successKicker": "Pedido confirmado",

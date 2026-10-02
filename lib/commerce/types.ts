@@ -58,12 +58,46 @@ export interface ProductSummary {
   categorySlug?: string;
 }
 
+/**
+ * One selectable chain length. `extra` is the surcharge in minor units
+ * (centavos, a non-negative integer) — the same unit as `Money.amount` — and
+ * 0 means the length costs nothing extra.
+ */
+export interface ChainLengthOption {
+  lengthCm: number;
+  extra: number;
+}
+
+/**
+ * What a shopper must choose before a piece can be bought, already resolved
+ * to concrete values (per-piece override -> "Ajustes del sitio" defaults ->
+ * code defaults — see lib/commerce/options.ts). `none` means the piece is
+ * bought as-is. Lives on the detail `Product` only: the listing summary never
+ * renders a picker, so it never carries (or serializes) these lists.
+ */
+export type ProductOptions =
+  | { kind: "none" }
+  | { kind: "ringSize"; values: string[] }
+  | { kind: "chainLength"; values: ChainLengthOption[] };
+
+/**
+ * A shopper's pick, as carried by a cart line. It is CLIENT-SUPPLIED once it
+ * leaves the product page (Server Action argument / localStorage), so
+ * anything that is charged or shipped must re-validate it against the
+ * catalog's `ProductOptions` (`validateOption` in lib/commerce/options.ts).
+ */
+export type SelectedOption =
+  | { kind: "ringSize"; value: string }
+  | { kind: "chainLength"; lengthCm: number };
+
 export interface Product extends ProductSummary {
   description: string;
   /** Full gallery — image and video/GIF items, in author order. */
   media: MediaItem[];
   /** Full localized category, for display (e.g. the product-detail spec-plate). */
   category?: Category;
+  /** What the shopper must choose before buying — see `ProductOptions`. */
+  options: ProductOptions;
 }
 
 export interface CommerceReadApi {

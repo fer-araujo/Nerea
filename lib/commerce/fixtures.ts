@@ -1,3 +1,4 @@
+import { resolveProductOptions } from "./options";
 import { resolveLocalized, toAvailability, type Localized } from "./transforms";
 import type {
   Availability,
@@ -28,6 +29,12 @@ interface FixtureProduct {
    * single derivation point, instead of being trusted directly.
    */
   status: string;
+  /**
+   * Mirrors the Studio's `purchaseOption` radio. Fixtures carry no per-piece
+   * lists or site settings, so `resolveProductOptions` falls through to the
+   * built-in defaults — the same path an untouched Studio takes.
+   */
+  purchaseOption: "none" | "ringSize" | "chainLength";
 }
 
 // One category per fixture, matching each piece's real product type — this
@@ -74,6 +81,7 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
     category: CATEGORY_RINGS,
     price: { amount: 185000, currency: "MXN" }, // $1,850.00 MXN
     status: "available",
+    purchaseOption: "ringSize",
   },
   {
     handle: "dije-oro-amatista",
@@ -89,6 +97,7 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
     category: CATEGORY_PENDANTS,
     price: { amount: 420000, currency: "MXN" }, // $4,200.00 MXN
     status: "sold",
+    purchaseOption: "chainLength",
   },
   {
     handle: "aretes-plata-luna",
@@ -109,6 +118,7 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
     category: CATEGORY_EARRINGS,
     price: { amount: 95000, currency: "MXN" }, // $950.00 MXN
     status: "available",
+    purchaseOption: "none",
   },
 ];
 
@@ -138,6 +148,7 @@ function toProduct(product: FixtureProduct, locale: Locale): Product {
           slug: product.category.slug,
         }
       : undefined,
+    options: resolveProductOptions({ purchaseOption: product.purchaseOption }),
   };
 }
 

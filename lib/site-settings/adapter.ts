@@ -1,7 +1,7 @@
 import { toMediaItem, type RawMediaItem } from "@/lib/commerce/sanity/adapter";
 import { sanityClient } from "@/lib/commerce/sanity/client";
 import type { Locale } from "@/lib/commerce/types";
-import { SITE_SETTINGS_QUERY } from "./queries";
+import { SHIPPING_FEE_QUERY, SITE_SETTINGS_QUERY } from "./queries";
 import type { SiteSettings } from "./types";
 
 export const SITE_SETTINGS_TAG = "site-settings";
@@ -62,4 +62,35 @@ export async function getSiteSettings(locale: Locale): Promise<SiteSettings> {
   } catch {
     return EMPTY_SITE_SETTINGS;
   }
+}
+
+/**
+ * The flat shipping fee in centavos (0 = free shipping), for
+ * `checkoutAction` to hand to Stripe. SERVER-ONLY by use: the fee is read
+ * here from the "siteSettings" singleton and never taken from the client.
+ *
+ * Deliberately NOT built on `getSiteSettings`: that reader fails safe to an
+ * all-null object so a Sanity blip degrades branding instead of 500ing the
+ * chrome — the right call for decoration, the wrong one for money, where
+ * "unreadable" must never silently become "free shipping". A fetch error
+ * propagates so checkout fails closed (checkoutAction collapses it to its
+ * retryable result). Only a MISSING value (document or field not created
+ * yet, i.e. null/undefined) means 0, matching the Studio field's "0 or empty
+ * = free" wording. Any PRESENT value is passed through as-is — a negative or
+ * fractional number, or something that is not a number at all — and rejected
+ * by createCheckoutSession's own guard rather than being coerced here, so a
+ * mistyped setting can never silently turn into free shipping.
+ */
+export async function getShippingFee(): Promise<number> {
+  const fee = await sanityClient.fetch<number | null>(
+    SHIPPING_FEE_QUERY,
+    {},
+    {
+      next: {
+        revalidate: SITE_SETTINGS_REVALIDATE_SECONDS,
+        tags: [SITE_SETTINGS_TAG],
+      },
+    },
+  );
+  return fee ?? 0;
 }

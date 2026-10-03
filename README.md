@@ -79,6 +79,25 @@ Sessions last 5 days (httpOnly, `SameSite=Strict` cookie scoped to `/admin`,
 revocation-checked on every request). Signing out revokes the user's Firebase
 refresh tokens, which ends the session on every device.
 
+### Calculadora, Inventario and Inversiones
+
+Three more panel pages, all behind the same session check:
+
+- **Calculadora** — casting math (metal from wax weight, fine and alloy split,
+  with the alloy table prefilled and editable). "Registrar vaciado" consumes the
+  chosen fine-metal and alloy materials.
+- **Inventario** — materials with stock, average cost and per-material history.
+- **Inversiones** — purchases by period (this month / last month / this year,
+  in `America/Mexico_City` time) with the period total. To load what she already
+  has, register it as a purchase called **Inventario inicial** with its cost.
+
+Firestore collections (written only by the Admin SDK, inside transactions):
+`materials` (current stock and average cost) with an append-only `movements`
+subcollection, `purchases`, `castings` and `auditLog` (who did what to which
+document, never the values). Money is stored as integer centavos. Every query
+filters or orders by a single field, so **no composite index is needed** — there
+is no `firestore.indexes.json` to deploy.
+
 ## Testing and CI
 
 ```bash

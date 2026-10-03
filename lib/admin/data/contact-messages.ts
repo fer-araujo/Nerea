@@ -1,6 +1,7 @@
 import "server-only";
 import { FieldValue, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/admin/firebase/admin";
+import { COLLECTIONS } from "./shared";
 
 // Contact-form inbox, stored in the Firestore `contactMessages` collection.
 // Replaces the former Sanity `contactMessage` documents: a Sanity dataset is
@@ -13,7 +14,7 @@ import { getAdminDb } from "@/lib/admin/firebase/admin";
 // expected state (build, local dev before the project exists) and is reported
 // as a falsy/null return, mirroring getStripeClient(); real Firestore
 // failures REJECT, and each caller decides how to degrade.
-const COLLECTION = "contactMessages";
+const COLLECTION = COLLECTIONS.contactMessages;
 
 export const MESSAGES_PAGE_SIZE = 25;
 // Offset pagination reads (and bills) every skipped document, so bound it.
@@ -119,6 +120,28 @@ export async function listContactMessages(
     messages: snapshot.docs.slice(0, MESSAGES_PAGE_SIZE).map(toContactMessage),
     hasNextPage: snapshot.docs.length > MESSAGES_PAGE_SIZE,
   };
+}
+
+/**
+ * How many messages are still unread, for the dashboard. Uses Firestore's
+ * count aggregation over `read == false`: one equality filter on one field,
+ * served by the automatic single-field index (no composite index), and billed
+ * as a handful of index reads instead of one read per message. Returns `null`
+ * when Firebase isn't configured; a Firestore failure rejects.
+ */
+export async function countUnreadMessages(): Promise<number | null> {
+  const db = getAdminDb();
+  if (!db) {
+    return null;
+  }
+
+  const snapshot = await db
+    .collection(COLLECTION)
+    .where("read", "==", false)
+    .count()
+    .get();
+
+  return snapshot.data().count;
 }
 
 /**

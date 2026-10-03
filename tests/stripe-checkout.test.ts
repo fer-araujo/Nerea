@@ -61,6 +61,7 @@ describe("createCheckoutSession — line item mapping", () => {
     expect(url).toBe("https://checkout.stripe.com/c/test_123");
     expect(createMock).toHaveBeenCalledWith({
       mode: "payment",
+      payment_method_types: ["card"],
       line_items: [
         {
           price_data: {
@@ -121,6 +122,44 @@ describe("createCheckoutSession — line item mapping", () => {
 });
 
 const ONE_LINE = [{ name: "x", amount: 1000, quantity: 1 }];
+
+// Pay before sell: the webhook sells a piece only once its payment is
+// confirmed, and a one-of-one piece must not wait in limbo on a delayed
+// voucher. So the session is card-only, set HERE rather than left to whatever
+// the Stripe Dashboard's payment-method settings happen to say.
+describe("createCheckoutSession — card only", () => {
+  beforeEach(() => {
+    createMock.mockResolvedValue({ url: "https://checkout.stripe.com/c/test_card" });
+  });
+
+  it("asks Stripe for card payments and nothing else", async () => {
+    await createCheckoutSession(ONE_LINE, OPTIONS);
+
+    expect(createMock.mock.calls[0][0].payment_method_types).toEqual(["card"]);
+  });
+
+  it("is card-only whatever else the session carries: fee, metadata, locale", async () => {
+    await createCheckoutSession(ONE_LINE, {
+      ...OPTIONS,
+      shippingFee: 15000,
+      locale: "en",
+      handles: ["anillo-luna"],
+      options: [{ handle: "anillo-luna", option: { kind: "ringSize", value: "7" } }],
+    });
+
+    expect(createMock.mock.calls[0][0].payment_method_types).toEqual(["card"]);
+  });
+
+  it("offers no way for the caller to widen it", async () => {
+    await createCheckoutSession(ONE_LINE, {
+      ...OPTIONS,
+      // Not part of the options type: a stray value must not be picked up.
+      payment_method_types: ["oxxo", "customer_balance"],
+    } as typeof OPTIONS);
+
+    expect(createMock.mock.calls[0][0].payment_method_types).toEqual(["card"]);
+  });
+});
 
 describe("createCheckoutSession — shipping and phone collection", () => {
   beforeEach(() => {

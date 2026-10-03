@@ -23,6 +23,7 @@
   --brass: #a9814e; /* matte laton */
   --brass-deep: #8a6a3f; /* brass on light, hover/active */
   --jade: #3b5245; /* gemstone green — the "available" signal, nothing else */
+  --garnet: #8f2d24; /* gemstone red — a loss in the admin panel (negative profit), nothing else; 7:1 on the bone surfaces */
 
   /* Hairlines */
   --line: #ddd4c5;
@@ -38,6 +39,7 @@
   --color-brass: var(--brass);
   --color-brass-deep: var(--brass-deep);
   --color-jade: var(--jade);
+  --color-garnet: var(--garnet);
   --color-line: var(--line);
 
   --color-background: var(--bone);

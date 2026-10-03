@@ -290,3 +290,39 @@ export function serializeOption(handle: string, option: SelectedOption): string 
     ? `${handle}:size=${option.value}`
     : `${handle}:chain=${option.lengthCm}`;
 }
+
+// `handle:size=7` / `handle:chain=45`: a handle is a slug, so it never holds a
+// ":", "," or "=" and the three parts split unambiguously.
+const SERIALIZED_OPTION_PATTERN = /^([^:,=]+):(size|chain)=(.+)$/;
+
+/**
+ * The inverse of `serializeOption` over the comma-joined `metadata.options`
+ * of a Checkout Session: handle -> the option chosen for that piece. Read by
+ * the sales recorder, which only ever wants a label for what was chosen.
+ * Entries that don't parse (blank, unknown kind, a non-positive chain length,
+ * or the tail Stripe's 500-char cap cut off mid-way) are skipped, never thrown
+ * on: the metadata is informational and must not be able to fail a webhook.
+ */
+export function parseSerializedOptions(
+  raw: string | null | undefined,
+): Map<string, SelectedOption> {
+  const options = new Map<string, SelectedOption>();
+  if (!raw) return options;
+
+  for (const entry of raw.split(",")) {
+    const match = SERIALIZED_OPTION_PATTERN.exec(entry.trim());
+    if (!match) continue;
+
+    const [, handle, kind, value] = match;
+    if (kind === "size") {
+      const size = value.trim();
+      if (size !== "") options.set(handle, { kind: "ringSize", value: size });
+    } else {
+      const lengthCm = Number(value);
+      if (Number.isFinite(lengthCm) && lengthCm > 0) {
+        options.set(handle, { kind: "chainLength", lengthCm });
+      }
+    }
+  }
+  return options;
+}

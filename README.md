@@ -31,8 +31,8 @@ sandbox blocks writing any `.env*` file outright; rename it locally to
 | `NEXT_PUBLIC_SITE_URL` | public | Used for `metadataBase`, canonical/hreflang URLs, and the sitemap/robots routes; falls back to `http://localhost:3000` when unset. |
 | `STRIPE_SECRET_KEY` | server-only | Stripe key for Checkout Sessions (`sk_test_…` while testing, `sk_live_…` at launch); never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the key) when unset. **It is also the payments switch:** while it is unset the cart offers "Apartar por mensaje" (a link to the contact form) instead of the checkout button, and the checkout Server Action refuses before reading Sanity. Set it and redeploy to turn payments on. |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | public | Stripe publishable key. |
-| `STRIPE_WEBHOOK_SECRET` | server-only | Signing secret for the `checkout.session.completed` webhook (`app/api/stripe/webhook/route.ts`) that marks a purchased piece sold; never prefix `NEXT_PUBLIC_`. Unset or invalid signatures fail closed (400, nothing processed). |
-| `SANITY_WRITE_TOKEN` | server-only | Write-capable token used by the Stripe webhook to mark a purchased piece `sold`; never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the token) when unset. |
+| `STRIPE_WEBHOOK_SECRET` | server-only | Signing secret for the Stripe webhook (`app/api/stripe/webhook/route.ts`), which marks a paid piece sold and records the sale; it must listen to `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Never prefix `NEXT_PUBLIC_`. Unset or invalid signatures fail closed (400, nothing processed). |
+| `SANITY_WRITE_TOKEN` | server-only | Write-capable token used to mark a paid piece `sold` (the Stripe webhook and the manual sale); never prefix `NEXT_PUBLIC_`. Never thrown on, never logged. **Unset is a failure, not a quiet no-op:** a paid piece can't be marked, so the webhook answers `500` (Stripe retries and shows it in its Dashboard) and a manual sale warns, by piece name, that the store was not updated. |
 | `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` | server-only | Firebase service account for the Admin SDK (Firestore + admin session cookies); never prefix `NEXT_PUBLIC_`. Unset or unusable: the contact form returns a server error and `/admin` login is refused (never throws, never logs the values). The private key may use literal `\n` sequences. |
 | `ADMIN_EMAILS` | server-only | Comma-separated allowlist of emails that may enter `/admin` (case-insensitive). Empty or unset means nobody (fails closed). Read on every admin request (never cached), so a removal applies as soon as the new environment is live (on Netlify, after a redeploy). To cut someone off immediately, disable their user in Firebase Authentication: sessions are revocation-checked on every request. |
 | `NEXT_PUBLIC_FIREBASE_API_KEY` / `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` / `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | public | Firebase web app config for the `/admin` login form. Public by design: it identifies the project and grants no access (Firestore rules deny all clients; the server enforces the allowlist). |
@@ -78,6 +78,91 @@ Firestore is never reachable from the browser. One-time setup:
 Sessions last 5 days (httpOnly, `SameSite=Strict` cookie scoped to `/admin`,
 revocation-checked on every request). Signing out revokes the user's Firebase
 refresh tokens, which ends the session on every device.
+
+### Calculadora, Inventario and Inversiones
+
+Three more panel pages, all behind the same session check:
+
+- **Calculadora** — casting math (metal from wax weight, fine and alloy split,
+  with the alloy table prefilled and editable). "Registrar vaciado" consumes the
+  chosen fine-metal and alloy materials.
+- **Inventario** — materials with stock, average cost and per-material history.
+- **Inversiones** — purchases by period (this month / last month / this year,
+  in `America/Mexico_City` time) with the period total. To load what she already
+  has, register it as a purchase called **Inventario inicial** with its cost.
+
+Firestore collections (written only by the Admin SDK, inside transactions):
+`materials` (current stock and average cost) with an append-only `movements`
+subcollection, `purchases`, `castings` and `auditLog` (who did what to which
+document, never the values). Money is stored as integer centavos. Every query
+filters or orders by a single field, so **no composite index is needed** — there
+is no `firestore.indexes.json` to deploy.
+
+### Piezas and Ventas
+
+Two more pages behind the same session check:
+
+- **Piezas** — every product in Sanity (sold ones included) with its price, the
+  cost to make it, the margin and the margin %. A piece with no cost recorded
+  shows **Costo pendiente**. "Calcular metal" fills the metal cost from grams ×
+  the average cost per gram of a chosen inventory material.
+- **Ventas** — sales by period (same Mexico-time periods as Inversiones) with the
+  totals: **Ventas** (the pieces' prices, shipping apart), **Costo de lo
+  vendido** and **Utilidad bruta**. Online-shop sales appear on their own; **Registrar
+  venta** adds one made outside the shop (price starts at the catalog's and can be
+  lowered), optionally marking the piece sold in the store. **Anular venta** voids a
+  manual sale: it stays on the list, muted, and leaves every total (nothing is
+  deleted, and it does not put the piece back on sale — do that in Studio).
+
+Collections: `pieces/{handle}` (cost by catalog slug; no document = cost pending)
+and `sales/{id}`. A sale freezes the cost of its pieces when it is recorded, so a
+later cost change never rewrites history; a sale that includes a piece with no cost
+is flagged `costPending` and the period totals warn that the gross profit is an
+upper bound. Sales hold **no customer data** (no email, name, address or phone):
+that stays in Stripe, and the sale keeps only the Checkout Session id.
+
+**Stripe webhook — pay before sell.** A piece is marked sold, and its sale
+recorded, only once its payment is confirmed: on `checkout.session.completed` with
+`payment_status: "paid"`, or on `checkout.session.async_payment_succeeded`. An
+unpaid `completed` and `checkout.session.async_payment_failed` are answered `200`
+and do nothing. Checkout is **card-only, enforced in code**
+(`payment_method_types: ["card"]` in `lib/commerce/stripe/checkout.ts`), so the
+Stripe Dashboard's payment-method settings can't introduce a delayed voucher; the
+async events are handled anyway so enabling one later stays correct. Both events
+must be selected on the Dashboard endpoint (see "Stripe go-live").
+
+For a paid session the webhook marks the piece(s) sold, then records the sale as
+`sales/stripe_<session id>`, written with `create`, so a redelivered event is a
+harmless duplicate. Both steps are always attempted, and **any failure answers
+`500` so Stripe retries and shows it in its Dashboard**, rather than losing a paid
+sale or leaving a paid piece on sale: a piece that could not be marked sold (no
+`SANITY_WRITE_TOKEN`, Sanity down), a sale that could not be written, or Firestore
+not being configured at all (one fixed log line). A product that no longer exists
+in Sanity is not a failure. Marking sold is idempotent and the sale is create-only,
+so a retry is safe. Signature verification is unchanged and still runs first. An
+online sale cannot be voided from the panel (refund it in Stripe).
+
+### Resumen and Respaldo
+
+The panel's home page, behind the same session check:
+
+- **Resumen** — the KPIs of a period (this month / last month / this year, Mexico
+  time): **Ventas**, **Costo de lo vendido**, **Utilidad bruta** (with its margin;
+  red when negative), **Inversiones**, **Flujo** (ventas − inversiones), the value
+  of the inventory, pieces available / sold, unread messages and the sales still
+  waiting for a cost — plus a chart of the last 12 months (empty months included)
+  with a "Ver como tabla" view of the same numbers. One read of the sales and
+  purchases (the period plus those 12 months) feeds the cards and the chart, in
+  cursor-paged batches of 500, newest first, single-field queries only (still no
+  composite index). A read that reaches its cap is never hidden: the page shows
+  **Datos parciales** and says which figures are affected.
+- **Descargar respaldo** — `GET /admin/api/export` (admin only, `401` JSON
+  otherwise) downloads every collection as one JSON file,
+  `nerea-respaldo-YYYY-MM-DD.json` (Mexico date): materials with their
+  `movements`, purchases, castings, pieces, sales, contact messages and the audit
+  log. Timestamps are ISO strings, `Cache-Control: no-store`, nothing is logged.
+  **It contains visitors' personal data** (the contact inbox): keep it somewhere
+  safe. The charts use `recharts`, loaded only on this page.
 
 ## Testing and CI
 
@@ -181,10 +266,11 @@ pinned as `deployment.appId` in `sanity.cli.ts`.
 1. Finish activating the Stripe account (business details, bank account).
 2. Netlify: set `STRIPE_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
 3. Stripe Dashboard > Developers > Webhooks > Add endpoint:
-   `https://<your-site>/api/stripe/webhook`, event `checkout.session.completed`.
-   Copy its signing secret into `STRIPE_WEBHOOK_SECRET`. Test and live mode have
-   separate keys and separate endpoints: create the endpoint in the same mode as
-   the keys.
+   `https://<your-site>/api/stripe/webhook`, events **`checkout.session.completed`
+   and `checkout.session.async_payment_succeeded`** (select both: a piece is
+   only sold once its payment is confirmed). Copy its signing secret into
+   `STRIPE_WEBHOOK_SECRET`. Test and live mode have separate keys and separate
+   endpoints: create the endpoint in the same mode as the keys.
 4. **Redeploy.** The payments gate lifts when the build sees
    `STRIPE_SECRET_KEY`.
 5. Test purchase: first with test keys (card `4242 4242 4242 4242`). Stripe asks

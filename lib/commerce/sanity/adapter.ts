@@ -54,8 +54,10 @@ interface RawProductSummary {
 }
 
 // `purchaseOption` / `ringSizes` / `chainLengths` are the piece's own option
-// fields; `optionDefaults` is the "siteSettings" singleton's lists, projected
-// in the same query (null when that document does not exist yet).
+// fields; `categoryPurchaseOption` is its category's choice (what an
+// "inherit"/unset piece falls back to); `optionDefaults` is the "siteSettings"
+// singleton's lists, projected in the same query (null when that document does
+// not exist yet).
 interface RawProduct extends RawOptionSource {
   handle: string;
   title: string;

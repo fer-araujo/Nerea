@@ -78,7 +78,13 @@ const HARNESS_ITEMS: Record<string, Omit<CartLineItem, "quantity">> = {
   "add-pendant-50": PENDANT_50,
 };
 
-function TestHarness({ paymentsEnabled }: { paymentsEnabled: boolean }) {
+function TestHarness({
+  paymentsEnabled,
+  whatsappNumber,
+}: {
+  paymentsEnabled: boolean;
+  whatsappNumber?: string;
+}) {
   const { addItem, open, isOpen } = useCart();
   return (
     <>
@@ -93,19 +99,26 @@ function TestHarness({ paymentsEnabled }: { paymentsEnabled: boolean }) {
       {/* The cart's own open flag: readable at once, without waiting for the
           drawer's exit animation to finish. */}
       <span data-testid="cart-open">{String(isOpen)}</span>
-      <CartDrawer paymentsEnabled={paymentsEnabled} />
+      <CartDrawer
+        paymentsEnabled={paymentsEnabled}
+        whatsappNumber={whatsappNumber}
+      />
     </>
   );
 }
 
 // Payments are on unless a test says otherwise, which is what the layout
-// passes once a Stripe key is configured.
-function renderCart(paymentsEnabled = true) {
+// passes once a Stripe key is configured. The WhatsApp number is absent unless
+// a test passes one (the layout passes it from the site settings).
+function renderCart(paymentsEnabled = true, whatsappNumber?: string) {
   return render(
     <NextIntlClientProvider locale="es" messages={esMessages}>
       <MotionProvider>
         <CartProvider>
-          <TestHarness paymentsEnabled={paymentsEnabled} />
+          <TestHarness
+            paymentsEnabled={paymentsEnabled}
+            whatsappNumber={whatsappNumber}
+          />
         </CartProvider>
       </MotionProvider>
     </NextIntlClientProvider>,
@@ -206,6 +219,100 @@ describe("CartDrawer — payments gate", () => {
     expect(screen.getByText(ITEM_A.title)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(storedCart().map((line) => line.handle)).toEqual([ITEM_A.handle]);
+  });
+});
+
+describe("CartDrawer — WhatsApp in the payments gate", () => {
+  const NUMBER = "5215512345678";
+
+  it("adds WhatsApp as a secondary link under the reserve link while payments are off", async () => {
+    renderCart(false, NUMBER);
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText(ITEM_A.title);
+
+    const whatsapp = screen.getByRole("link", {
+      name: esMessages.Cart.whatsappCta,
+    });
+    expect(whatsapp).toHaveAttribute(
+      "href",
+      `https://wa.me/${NUMBER}?text=${encodeURIComponent(esMessages.Cart.whatsappText)}`,
+    );
+    expect(whatsapp).toHaveAttribute("target", "_blank");
+    expect(whatsapp).toHaveAttribute("rel", "noopener noreferrer");
+
+    // The reserve-by-message link is still there, and still first.
+    const reserve = screen.getByRole("link", {
+      name: esMessages.Cart.reserveCta,
+    });
+    expect(
+      reserve.compareDocumentPosition(whatsapp) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("leaves the drawer open when the WhatsApp link is followed (it opens in a new tab)", async () => {
+    const blockNavigation = (event: Event) => event.preventDefault();
+    document.addEventListener("click", blockNavigation);
+    try {
+      renderCart(false, NUMBER);
+      fireEvent.click(screen.getByText("add-a"));
+      await screen.findByText(ITEM_A.title);
+
+      fireEvent.click(
+        screen.getByRole("link", { name: esMessages.Cart.whatsappCta }),
+      );
+
+      expect(screen.getByTestId("cart-open")).toHaveTextContent("true");
+    } finally {
+      document.removeEventListener("click", blockNavigation);
+    }
+  });
+
+  it.each([
+    ["no number is set", undefined],
+    ["the number is not usable", "12345"],
+  ])("shows no WhatsApp link when %s", async (_label, number) => {
+    renderCart(false, number);
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText(ITEM_A.title);
+
+    expect(
+      screen.queryByRole("link", { name: esMessages.Cart.whatsappCta }),
+    ).not.toBeInTheDocument();
+    // The reserve link is unaffected.
+    expect(
+      screen.getByRole("link", { name: esMessages.Cart.reserveCta }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no WhatsApp link while payments are on, even with a number", async () => {
+    renderCart(true, NUMBER);
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText(ITEM_A.title);
+
+    expect(
+      screen.queryByRole("link", { name: esMessages.Cart.whatsappCta }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers WhatsApp too once the server reports payments disabled", async () => {
+    checkoutActionMock.mockResolvedValue({
+      ok: false,
+      reason: "payments-disabled",
+    });
+    renderCart(true, NUMBER);
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText(ITEM_A.title);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    );
+
+    expect(
+      await screen.findByRole("link", { name: esMessages.Cart.whatsappCta }),
+    ).toBeInTheDocument();
   });
 });
 

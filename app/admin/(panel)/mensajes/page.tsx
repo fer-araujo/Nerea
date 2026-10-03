@@ -7,6 +7,7 @@ import {
   type ContactMessage,
   type ContactMessagePage,
 } from "@/lib/admin/data/contact-messages";
+import { buildReplyMailto, mailtoHref } from "@/lib/admin/reply-mailto";
 import { MarkReadForm } from "./MarkReadForm";
 
 export const metadata: Metadata = {
@@ -40,14 +41,6 @@ function pageHref(page: number): string {
   return page <= 1 ? MESSAGES_PATH : `${MESSAGES_PATH}?page=${page}`;
 }
 
-// The address was validated on the way in, but it is still visitor-supplied
-// data. encodeURIComponent keeps "?", "&", "=" and friends from being read as
-// mailto header fields (a smuggled "?bcc=..."); "@" is restored because mail
-// clients expect it literal in the recipient.
-function mailtoHref(email: string): string {
-  return `mailto:${encodeURIComponent(email).replace(/%40/g, "@")}`;
-}
-
 async function loadMessages(page: number): Promise<ContactMessagePage | null> {
   try {
     // `null` = Firebase not configured; a throw = Firestore failure. Either
@@ -59,8 +52,13 @@ async function loadMessages(page: number): Promise<ContactMessagePage | null> {
 }
 
 // Every field below is visitor-supplied. It is rendered ONLY as React text
-// children (auto-escaped) or as a mailto: href built above — never as HTML.
+// children (auto-escaped) or as a mailto: href built by lib/admin/reply-mailto
+// (which percent-encodes every visitor-supplied value) — never as HTML.
 function MessageItem({ message }: { message: ContactMessage }) {
+  const receivedAt = message.createdAt
+    ? DATE_FORMATTER.format(message.createdAt)
+    : null;
+
   return (
     <li
       className={cn(
@@ -77,7 +75,7 @@ function MessageItem({ message }: { message: ContactMessage }) {
             dateTime={message.createdAt.toISOString()}
             className="font-mono text-xs text-graphite"
           >
-            {DATE_FORMATTER.format(message.createdAt)}
+            {receivedAt}
           </time>
         ) : null}
       </div>
@@ -96,6 +94,21 @@ function MessageItem({ message }: { message: ContactMessage }) {
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1">
+        {message.email ? (
+          // The label says what it does for a screen reader that lists every
+          // link on a page of 25 messages; it starts with the visible text.
+          <a
+            href={buildReplyMailto({
+              email: message.email,
+              message: message.message,
+              receivedAt,
+            })}
+            aria-label={`Responder a ${message.name || message.email}`}
+            className="inline-flex min-h-11 items-center font-sans text-sm text-ink underline decoration-brass underline-offset-4 transition-colors hover:text-brass-deep"
+          >
+            Responder
+          </a>
+        ) : null}
         {message.read ? (
           <span className={LABEL_CLASS}>Leído</span>
         ) : (

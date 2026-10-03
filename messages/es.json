@@ -21,6 +21,7 @@
     "specAtelierValue": "hecho a mano en méxico"
   },
   "Nav": {
+    "home": "Inicio",
     "shop": "Tienda",
     "about": "Nosotros",
     "contact": "Contacto"
@@ -80,13 +81,18 @@
     "optionChainLength": "Cadena {cm} cm",
     "invalidOptionNotice": "Quitamos una pieza del carrito porque hay que elegir de nuevo su talla o largo de cadena. Hazlo desde la página de la pieza.",
     "paymentsSoon": "Los pagos en línea abren muy pronto. Escríbenos para apartar tus piezas.",
-    "reserveCta": "Apartar por mensaje"
+    "reserveCta": "Apartar por mensaje",
+    "whatsappCta": "Apartar por WhatsApp",
+    "whatsappText": "Hola, me gustaría apartar una pieza de nerea."
   },
   "Checkout": {
     "successKicker": "Pedido confirmado",
     "successTitle": "Gracias por tu compra",
     "successBody": "Tu pedido está confirmado. Ya tenemos tu dirección de envío y tu teléfono; la artesana te contactará por correo o por teléfono para coordinar la entrega.",
-    "successCta": "Seguir explorando"
+    "successCta": "Seguir explorando",
+    "whatsappCta": "Escríbenos por WhatsApp",
+    "whatsappText": "Hola, acabo de hacer un pedido en nerea y me gustaría coordinar la entrega.",
+    "messageCta": "Déjanos un mensaje"
   },
   "About": {
     "kicker": "El taller",
@@ -122,7 +128,9 @@
     "successBody": "Gracias por escribir — la artesana te responderá personalmente en cuanto pueda.",
     "errorValidation": "Revisa tus datos e intenta de nuevo.",
     "errorRateLimit": "Has enviado varios mensajes seguidos. Espera un momento y vuelve a intentar.",
-    "errorServer": "No se pudo enviar el mensaje. Intenta de nuevo en unos minutos."
+    "errorServer": "No se pudo enviar el mensaje. Intenta de nuevo en unos minutos.",
+    "whatsappCta": "Escríbenos por WhatsApp",
+    "whatsappText": "Hola, me gustaría saber más sobre las piezas de nerea."
   },
   "Meta": {
     "ogImageAlt": "nerea — taller de joyería de autor, piezas únicas hechas a mano",

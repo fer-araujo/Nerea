@@ -21,6 +21,7 @@
     "specAtelierValue": "handmade in mexico"
   },
   "Nav": {
+    "home": "Home",
     "shop": "Shop",
     "about": "About",
     "contact": "Contact"
@@ -80,13 +81,18 @@
     "optionChainLength": "{cm} cm chain",
     "invalidOptionNotice": "We removed a piece from your cart because its size or chain length needs to be chosen again. You can do that from the piece's page.",
     "paymentsSoon": "Online payments open very soon. Write to us to reserve your pieces.",
-    "reserveCta": "Reserve by message"
+    "reserveCta": "Reserve by message",
+    "whatsappCta": "Reserve on WhatsApp",
+    "whatsappText": "Hi, I'd like to reserve a piece from nerea."
   },
   "Checkout": {
     "successKicker": "Order confirmed",
     "successTitle": "Thank you for your purchase",
     "successBody": "Your order is confirmed. We have your shipping address and phone number; the artisan will contact you by email or phone to coordinate delivery.",
-    "successCta": "Keep browsing"
+    "successCta": "Keep browsing",
+    "whatsappCta": "Message us on WhatsApp",
+    "whatsappText": "Hi, I just placed an order on nerea and would like to coordinate delivery.",
+    "messageCta": "Leave us a message"
   },
   "About": {
     "kicker": "The atelier",
@@ -122,7 +128,9 @@
     "successBody": "Thank you for writing — the artisan will reply personally as soon as she can.",
     "errorValidation": "Please check your details and try again.",
     "errorRateLimit": "You've sent several messages in a row. Wait a moment and try again.",
-    "errorServer": "Your message couldn't be sent. Please try again in a few minutes."
+    "errorServer": "Your message couldn't be sent. Please try again in a few minutes.",
+    "whatsappCta": "Message us on WhatsApp",
+    "whatsappText": "Hi, I'd like to know more about nerea's pieces."
   },
   "Meta": {
     "ogImageAlt": "nerea — author jewelry atelier, one-of-a-kind handmade pieces",

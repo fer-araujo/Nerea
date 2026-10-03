@@ -74,6 +74,38 @@ body {
   color: var(--bone);
 }
 
+/*
+  Tailwind v4's preflight no longer gives buttons `cursor: pointer` (they keep
+  the browser's default arrow), so restore the pointer on every control that
+  acts on click and mark disabled ones as not-allowed. This stylesheet is
+  shared by the storefront and /admin (both root layouts import it). It lives
+  in @layer base so any utility (`cursor-pointer`, `disabled:cursor-not-allowed`,
+  ...) still wins. The pointer list sits in :where() (zero specificity) so the
+  not-allowed rules below beat it for a disabled <select>, checkbox, radio or
+  submit regardless of selector weight; they also come later in source order.
+*/
+@layer base {
+  :where(
+    button:not(:disabled),
+    [role="button"],
+    [role="radio"],
+    [role="tab"],
+    select,
+    summary,
+    label[for],
+    input[type="checkbox"],
+    input[type="radio"],
+    input[type="submit"]
+  ) {
+    cursor: pointer;
+  }
+
+  :disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 /* Respect user motion preference globally. */
 @media (prefers-reduced-motion: reduce) {
   *,

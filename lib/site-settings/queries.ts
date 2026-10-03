@@ -16,7 +16,8 @@ export const SITE_SETTINGS_QUERY = `
 *[_id == "siteSettings"][0] {
   "logo": logo${MEDIA_ITEM_PROJECTION},
   "hero": heroMedia[0]${MEDIA_ITEM_PROJECTION},
-  "heroAlt": coalesce(heroAlt[$locale], heroAlt.es)
+  "heroAlt": coalesce(heroAlt[$locale], heroAlt.es),
+  whatsappNumber
 }
 `;
 

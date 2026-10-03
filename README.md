@@ -11,7 +11,7 @@ breakdown.
 
 ```bash
 npm install
-cp env.example .env.local   # fill in Sanity/Stripe values, or leave
+cp env.example .env.local   # fill in Sanity/Stripe values, or set
                              # COMMERCE_SOURCE=fixtures for credential-free dev
 npm run dev
 ```
@@ -26,8 +26,8 @@ sandbox blocks writing any `.env*` file outright; rename it locally to
 
 | Variable | Scope | Notes |
 |---|---|---|
-| `COMMERCE_SOURCE` | server-only | `sanity` (default — live catalog) or `fixtures` (no credentials required; dev/test-only, e.g. `COMMERCE_SOURCE=fixtures`). |
-| `NEXT_PUBLIC_SANITY_PROJECT_ID` / `NEXT_PUBLIC_SANITY_DATASET` | public | Sanity project identifiers; fall back to the real project's values in `sanity/env.ts` when unset. |
+| `COMMERCE_SOURCE` | server-only | Empty or unset means `sanity` (the live catalog). Only the exact value `fixtures` switches to the demo products (no credentials required; dev/test-only, e.g. `COMMERCE_SOURCE=fixtures`); any other value also means `sanity`. |
+| `NEXT_PUBLIC_SANITY_PROJECT_ID` / `NEXT_PUBLIC_SANITY_DATASET` | public | Sanity project identifiers; fall back to the real project's values in `sanity/env.ts` when unset or empty. |
 | `NEXT_PUBLIC_SITE_URL` | public | Used for `metadataBase`, canonical/hreflang URLs, and the sitemap/robots routes; falls back to `http://localhost:3000` when unset. |
 | `STRIPE_SECRET_KEY` | server-only | Stripe key for Checkout Sessions (`sk_test_…` while testing, `sk_live_…` at launch); never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the key) when unset. **It is also the payments switch:** while it is unset the cart offers "Apartar por mensaje" (a link to the contact form) instead of the checkout button, and the checkout Server Action refuses before reading Sanity. Set it and redeploy to turn payments on. |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | public | Stripe publishable key. |
@@ -132,7 +132,7 @@ configuration > Environment variables:
 | `ADMIN_EMAILS` | Comma-separated emails allowed into `/admin`. |
 | `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | Leave unset until step 6: the cart shows the payments gate meanwhile. |
 
-Leave `COMMERCE_SOURCE` unset (the live catalog is the default). A variable only
+Leave `COMMERCE_SOURCE` unset or empty (the live catalog is the default). A variable only
 reaches a new build, so redeploy after changing any of them (`NEXT_PUBLIC_*`
 values are inlined at build time). The contact form's rate limiter detects
 Netlify at build time and reads `x-nf-client-connection-ip`; there is nothing to

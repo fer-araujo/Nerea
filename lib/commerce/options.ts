@@ -44,8 +44,26 @@ export interface RawOptionDefaults {
   chainLengths?: (RawChainLength | null)[] | null;
 }
 
+/**
+ * A piece's `purchaseOption` value meaning "use my category's option". The
+ * Studio offers it as "Según la categoría" and it is the default for new
+ * pieces; a piece with NO value (every document created before the field
+ * existed) is treated the same way.
+ */
+export const INHERIT_PURCHASE_OPTION = "inherit";
+
 export interface RawOptionSource extends RawOptionDefaults {
+  /**
+   * The piece's own choice: "none", "ringSize" or "chainLength" (explicit, and
+   * always wins), or "inherit"/unset to take the category's.
+   */
   purchaseOption?: string | null;
+  /**
+   * The piece's category's own `purchaseOption` (GROQ `category->purchaseOption`):
+   * what an inheriting piece falls back to. Null/undefined when the piece has
+   * no category or the category has not set one.
+   */
+  categoryPurchaseOption?: string | null;
 }
 
 // Trims, drops blanks/non-strings and de-duplicates, then orders numerically.
@@ -106,17 +124,37 @@ function firstNonEmpty<T>(...lists: readonly (readonly T[])[]): T[] {
   return found ? [...found] : [];
 }
 
+// Which KIND of option a piece takes. The piece's own explicit choice always
+// wins, "none" included. A piece that says "inherit" — or says nothing, like
+// every document created before the field existed — takes its category's
+// choice. Whatever is left (no category, a category with no choice, or an
+// unrecognized value anywhere) falls to the `default` branch of the switch in
+// resolveProductOptions: none.
+function resolvePurchaseKind(
+  source: RawOptionSource,
+): string | null | undefined {
+  const own = source.purchaseOption;
+  const inherits =
+    own === undefined || own === null || own === INHERIT_PURCHASE_OPTION;
+  return inherits ? source.categoryPurchaseOption : own;
+}
+
 /**
- * Resolves a piece's purchase options: the piece's own list when it has one,
- * else the "Ajustes del sitio" defaults, else the code defaults — so a picker
- * can never end up empty. An unset or unrecognized `purchaseOption` resolves
- * to `none` (the Studio field's default).
+ * Resolves a piece's purchase options in two independent steps.
+ *
+ * KIND (none / ring size / chain length): the piece's own explicit choice,
+ * else — when the piece says "inherit" or says nothing — its category's, else
+ * none. An unrecognized value resolves to none.
+ *
+ * VALUES for that kind: the piece's own list when it has one, else the
+ * "Ajustes del sitio" defaults, else the code defaults — so a picker can never
+ * end up empty.
  */
 export function resolveProductOptions(
   source: RawOptionSource,
   defaults?: RawOptionDefaults | null,
 ): ProductOptions {
-  switch (source.purchaseOption) {
+  switch (resolvePurchaseKind(source)) {
     case "ringSize":
       return {
         kind: "ringSize",

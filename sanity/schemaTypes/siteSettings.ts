@@ -1,5 +1,6 @@
 import { defineField, defineType } from "sanity";
 import { DEFAULT_RING_SIZES } from "../../lib/commerce/options";
+import { validateWhatsappNumberInput } from "../../lib/site-settings/whatsapp";
 
 // Site-wide branding singleton — see sanity.config.ts's Studio structure for
 // the singleton guard (a fixed document ID "siteSettings", with create/
@@ -87,6 +88,18 @@ export const siteSettings = defineType({
       type: "number",
       initialValue: 0,
       validation: (rule) => rule.integer().min(0).max(100000),
+    }),
+    // Public contact number behind the "Escríbenos por WhatsApp" links (checkout
+    // success page, contact page, cart footer while payments are off). Optional:
+    // left empty, those links simply do not render. Digits only because that is
+    // what wa.me takes; lib/site-settings/whatsapp.ts normalizes it again on read,
+    // so a document edited outside Studio cannot produce a broken link.
+    defineField({
+      name: "whatsappNumber",
+      title: "Número de WhatsApp",
+      description: "Con lada de país, solo dígitos, p. ej. 5215512345678",
+      type: "string",
+      validation: (rule) => rule.custom(validateWhatsappNumberInput),
     }),
   ],
   preview: {

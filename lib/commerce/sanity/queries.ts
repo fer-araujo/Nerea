@@ -21,11 +21,16 @@ export const MEDIA_ITEM_PROJECTION = `{
   "url": asset->url
 }`;
 
-// Purchase options (see sanity/schemaTypes/product.ts + siteSettings.ts). The
-// piece's own override lists AND the site-wide defaults are projected raw, in
-// ONE round trip, and resolved in TypeScript (lib/commerce/options.ts
-// `resolveProductOptions`) — keeping the "override -> settings -> built-in"
-// rule in a single unit-tested place instead of split across GROQ and code.
+// Purchase options (see sanity/schemaTypes/product.ts + category.ts +
+// siteSettings.ts). The piece's own choice and override lists, its category's
+// choice (`category->purchaseOption`) AND the site-wide defaults are projected
+// raw, in ONE round trip, and resolved in TypeScript (lib/commerce/options.ts
+// `resolveProductOptions`) — keeping the "piece -> category -> none" kind rule
+// and the "override -> settings -> built-in" values rule in a single
+// unit-tested place instead of split across GROQ and code. In particular the
+// piece's `purchaseOption` is NOT coalesced to "none" here: a piece that never
+// set one (every document created before the field existed) must stay null so
+// it can inherit its category's choice.
 // `extraPrice` coalesces to 0 (centavos): a missing surcharge means "no extra".
 // The "siteSettings" id is a fixed literal, same as lib/site-settings/queries.ts
 // — not user input, so nothing here is string-built from a parameter.
@@ -57,7 +62,8 @@ export const PRODUCT_BY_HANDLE_QUERY = `
     "title": coalesce(title[$locale], title.es, ""),
     "slug": slug.current
   },
-  "purchaseOption": coalesce(purchaseOption, "none"),
+  "purchaseOption": purchaseOption,
+  "categoryPurchaseOption": category->purchaseOption,
   "ringSizes": coalesce(ringSizes, []),
   "chainLengths": coalesce(chainLengths[]${CHAIN_LENGTH_PROJECTION}, []),
   "optionDefaults": *[_id == "siteSettings"][0] {

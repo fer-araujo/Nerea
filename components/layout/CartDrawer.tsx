@@ -9,6 +9,7 @@ import { useCart, type CartLineItem } from "@/lib/cart/cart-context";
 import { checkoutAction } from "@/lib/cart/checkout";
 import { Price } from "@/components/ui/Price";
 import { PlaceholderBlock } from "@/components/ui/PlaceholderBlock";
+import { WhatsAppLink } from "@/components/ui/WhatsAppLink";
 import { DURATION_BASE, EASE_OUT } from "@/components/motion/transitions";
 import type { Locale, Money } from "@/lib/commerce/types";
 import { cn } from "@/lib/cn";
@@ -40,17 +41,31 @@ function CartLineOption({ option }: { option: CartLineItem["option"] }) {
 const PRIMARY_ACTION_CLASS =
   "flex w-full items-center justify-center border border-ink bg-ink px-6 py-3 font-sans text-sm text-bone transition-colors duration-200 hover:border-brass-deep hover:bg-brass-deep";
 
+// The WhatsApp link under the "reserve by message" one: same footprint, quieter
+// look, so the form stays the primary way to reserve.
+const SECONDARY_ACTION_CLASS =
+  "mt-3 flex w-full items-center justify-center border border-ink px-6 py-3 font-sans text-sm text-ink transition-colors duration-200 hover:bg-bone-sunk";
+
 // Slide-over cart. Opens on add (CartProvider.addItem sets isOpen), lists
 // line items with a remove control, and hands off to the Stripe Checkout
 // Server Action. While online payments are off (`paymentsEnabled` false: no
 // Stripe key yet) the footer keeps the subtotal but offers a message to the
-// atelier instead of the checkout button. Reduced-motion is handled globally
+// atelier instead of the checkout button — plus, as a secondary option, a
+// WhatsApp chat when the site settings carry a number (`whatsappNumber`, fed
+// from the locale layout like `paymentsEnabled`; absent or unusable renders no
+// link). Reduced-motion is handled globally
 // by MotionProvider's `MotionConfig reducedMotion="user"` (transform
 // animations are stripped automatically) — unlike Reveal.tsx, this drawer
 // never needs to render without JS (it's interaction-only, mounted
 // client-side from the first "add to cart" click), so it doesn't need
 // Reveal's extra manual branch.
-export function CartDrawer({ paymentsEnabled }: { paymentsEnabled: boolean }) {
+export function CartDrawer({
+  paymentsEnabled,
+  whatsappNumber,
+}: {
+  paymentsEnabled: boolean;
+  whatsappNumber?: string;
+}) {
   // `Cart` copy (empty state, errors, checkout CTA) is assistant-drafted —
   // DRAFT PENDING ARTISAN REVIEW, same status as `About`/`Contact` (task
   // 5.5 content checklist). Also consumed by CartTrigger.tsx.
@@ -265,6 +280,13 @@ export function CartDrawer({ paymentsEnabled }: { paymentsEnabled: boolean }) {
                     >
                       {t("reserveCta")}
                     </Link>
+                    <WhatsAppLink
+                      number={whatsappNumber}
+                      message={t("whatsappText")}
+                      className={SECONDARY_ACTION_CLASS}
+                    >
+                      {t("whatsappCta")}
+                    </WhatsAppLink>
                   </>
                 ) : (
                   <button

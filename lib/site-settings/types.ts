@@ -16,4 +16,11 @@ export interface SiteSettings {
   hero: MediaItem | null;
   /** Accessible description of the hero backdrop, already locale-resolved. */
   heroAlt: string | null;
+  /**
+   * The atelier's WhatsApp number: digits only, with country code (e.g.
+   * "5215512345678"), ready for a wa.me link. `undefined` when the field is
+   * empty or not a usable number (see lib/site-settings/whatsapp.ts) —
+   * consumers then render no WhatsApp link at all.
+   */
+  whatsappNumber?: string;
 }

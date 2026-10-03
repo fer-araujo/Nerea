@@ -8,6 +8,7 @@ import {
   resolveProductOptions,
   serializeOption,
   validateOption,
+  type RawOptionSource,
 } from "../lib/commerce/options";
 import type {
   Locale,
@@ -188,6 +189,154 @@ describe("resolveProductOptions — normalization of CMS data", () => {
         ],
       }),
     ).toEqual({ kind: "chainLength", values: [{ lengthCm: 45, extra: 0 }] });
+  });
+});
+
+// The kind of option (none / ring size / chain length) comes from the piece when
+// it is explicit, else from the piece's category. Existing pieces have no
+// purchaseOption at all, so they must follow their category.
+describe("resolveProductOptions — category-level purchase option", () => {
+  const RING_DEFAULTS: ProductOptions = {
+    kind: "ringSize",
+    values: [...DEFAULT_RING_SIZES],
+  };
+  const CHAIN_DEFAULTS: ProductOptions = {
+    kind: "chainLength",
+    values: [...DEFAULT_CHAIN_LENGTHS],
+  };
+
+  it("resolves an undefined piece option under a ringSize category to ringSize", () => {
+    expect(
+      resolveProductOptions({
+        purchaseOption: undefined,
+        categoryPurchaseOption: "ringSize",
+      }),
+    ).toEqual(RING_DEFAULTS);
+  });
+
+  it.each([undefined, null, "inherit"])(
+    "makes a piece whose option is %j follow its category (ring size and chain length)",
+    (purchaseOption) => {
+      expect(
+        resolveProductOptions({
+          purchaseOption,
+          categoryPurchaseOption: "ringSize",
+        }),
+      ).toEqual(RING_DEFAULTS);
+      expect(
+        resolveProductOptions({
+          purchaseOption,
+          categoryPurchaseOption: "chainLength",
+        }),
+      ).toEqual(CHAIN_DEFAULTS);
+      expect(
+        resolveProductOptions({ purchaseOption, categoryPurchaseOption: "none" }),
+      ).toEqual({ kind: "none" });
+    },
+  );
+
+  it("lets an explicit none beat the category", () => {
+    expect(
+      resolveProductOptions({
+        purchaseOption: "none",
+        categoryPurchaseOption: "ringSize",
+      }),
+    ).toEqual({ kind: "none" });
+  });
+
+  it.each<[string, string, ProductOptions]>([
+    ["ringSize", "chainLength", RING_DEFAULTS],
+    ["chainLength", "ringSize", CHAIN_DEFAULTS],
+  ])(
+    "lets an explicit %s beat a %s category",
+    (purchaseOption, categoryPurchaseOption, expected) => {
+      expect(
+        resolveProductOptions({ purchaseOption, categoryPurchaseOption }),
+      ).toEqual(expected);
+    },
+  );
+
+  it.each<[string, RawOptionSource]>([
+    ["has no category", { purchaseOption: undefined }],
+    ["has no category and inherits", { purchaseOption: "inherit" }],
+    [
+      "has a category with no option set",
+      { purchaseOption: "inherit", categoryPurchaseOption: null },
+    ],
+    [
+      "has a category with an unrecognized option",
+      { purchaseOption: undefined, categoryPurchaseOption: "ring-size" },
+    ],
+    [
+      "has a category whose option is the piece-only 'inherit'",
+      { purchaseOption: undefined, categoryPurchaseOption: "inherit" },
+    ],
+  ])("resolves to none when the piece %s", (_label, source) => {
+    expect(resolveProductOptions(source)).toEqual({ kind: "none" });
+  });
+
+  it("does not fall through to the category for an unrecognized piece value", () => {
+    // Only unset/"inherit" inherit; a malformed value is an explicit-but-invalid
+    // choice and fails to "none", exactly as before categories had options.
+    for (const purchaseOption of ["ring-size", "", 42 as unknown as string]) {
+      expect(
+        resolveProductOptions({
+          purchaseOption,
+          categoryPurchaseOption: "ringSize",
+        }),
+      ).toEqual({ kind: "none" });
+    }
+  });
+
+  describe("the VALUES of an inherited kind keep their precedence", () => {
+    it("uses the piece's own list first", () => {
+      expect(
+        resolveProductOptions(
+          {
+            purchaseOption: undefined,
+            categoryPurchaseOption: "ringSize",
+            ringSizes: ["6", "7"],
+          },
+          { ringSizes: ["8", "9"] },
+        ),
+      ).toEqual({ kind: "ringSize", values: ["6", "7"] });
+    });
+
+    it("then the site defaults", () => {
+      expect(
+        resolveProductOptions(
+          {
+            purchaseOption: "inherit",
+            categoryPurchaseOption: "ringSize",
+            ringSizes: [],
+          },
+          { ringSizes: ["8", "9"] },
+        ),
+      ).toEqual({ kind: "ringSize", values: ["8", "9"] });
+    });
+
+    it("then the code defaults", () => {
+      expect(
+        resolveProductOptions(
+          { purchaseOption: null, categoryPurchaseOption: "chainLength" },
+          { chainLengths: [] },
+        ),
+      ).toEqual(CHAIN_DEFAULTS);
+    });
+
+    it("only reads the list that matches the inherited kind", () => {
+      // A piece's stale chain list must not leak into an inherited ring size.
+      expect(
+        resolveProductOptions(
+          {
+            purchaseOption: undefined,
+            categoryPurchaseOption: "ringSize",
+            chainLengths: [{ lengthCm: 60, extraPrice: 30000 }],
+          },
+          { ringSizes: ["8"] },
+        ),
+      ).toEqual({ kind: "ringSize", values: ["8"] });
+    });
   });
 });
 

@@ -5,10 +5,16 @@
 // commerce adapter could resolve a project to talk to. A real deployment
 // can still override both via NEXT_PUBLIC_SANITY_PROJECT_ID /
 // NEXT_PUBLIC_SANITY_DATASET.
+//
+// `?.trim() ||` rather than `??`: a blank `NEXT_PUBLIC_SANITY_PROJECT_ID=` line
+// (as copied from env.example) is a SET variable whose value is "", which `??`
+// would keep — and Sanity's client throws on an empty projectId. Empty or
+// whitespace-only means unset, so the fallback applies.
 export const projectId =
-  process.env.NEXT_PUBLIC_SANITY_PROJECT_ID ?? "3cvwg27s";
+  process.env.NEXT_PUBLIC_SANITY_PROJECT_ID?.trim() || "3cvwg27s";
 
-export const dataset = process.env.NEXT_PUBLIC_SANITY_DATASET ?? "production";
+export const dataset =
+  process.env.NEXT_PUBLIC_SANITY_DATASET?.trim() || "production";
 
 // Pin to a fixed, released Content Lake API version; bump deliberately.
 export const apiVersion = "2024-01-01";

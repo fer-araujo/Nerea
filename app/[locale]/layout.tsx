@@ -6,6 +6,7 @@ import { routing } from "@/i18n/routing";
 import { getSiteUrl, ogLocale, SITE_NAME } from "@/lib/seo";
 import { isStripeConfigured } from "@/lib/commerce/stripe/config";
 import { omitLegalCopy } from "@/lib/legal/content";
+import { getSiteSettings } from "@/lib/site-settings/adapter";
 import { MotionProvider } from "@/components/motion/MotionProvider";
 import { CartProvider } from "@/lib/cart/cart-context";
 import { Header } from "@/components/layout/Header";
@@ -74,9 +75,19 @@ export default async function LocaleLayout({
   // `next build -d`: "Static generation failed due to dynamic usage on
   // /es/products/... , reason: headers").
   //
+  // The messages and the site settings are independent, so they load together.
+  // The settings are the same ISR-tagged fetch the Header makes (request
+  // memoization collapses the two calls into one), read here only for the
+  // optional WhatsApp number the cart drawer offers; getSiteSettings never
+  // throws, so a Sanity blip just means no WhatsApp link.
+  const [allMessages, settings] = await Promise.all([
+    getMessages(),
+    getSiteSettings(locale),
+  ]);
+
   // The legal pages' copy is left out: it is long, only Server Components
   // render it, and passing it here would serialize it into every page.
-  const messages = omitLegalCopy(await getMessages());
+  const messages = omitLegalCopy(allMessages);
 
   return (
     <html
@@ -90,8 +101,12 @@ export default async function LocaleLayout({
               <Header locale={locale} />
               {children}
               <Footer locale={locale} />
-              {/* Only the boolean crosses to the client; the key never does. */}
-              <CartDrawer paymentsEnabled={isStripeConfigured()} />
+              {/* Only the boolean crosses to the client; the key never does.
+                  The WhatsApp number is public (it ends up in the link). */}
+              <CartDrawer
+                paymentsEnabled={isStripeConfigured()}
+                whatsappNumber={settings.whatsappNumber}
+              />
             </CartProvider>
           </MotionProvider>
         </NextIntlClientProvider>

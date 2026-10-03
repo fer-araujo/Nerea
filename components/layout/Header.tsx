@@ -32,6 +32,16 @@ export async function Header({ locale }: { locale: string }) {
           aria-label="Primary"
           className="flex items-center gap-5 sm:gap-7"
         >
+          {/* Explicit text link home, next to the logo's own. Hidden below `sm`
+              on purpose: the logo, "Tienda", the cart trigger and the language
+              toggle already fill a phone-width header, so a fourth item would
+              push it off-screen — there the logo stays the way home. */}
+          <Link
+            href="/"
+            className="hidden font-sans text-sm text-ink transition-colors hover:text-brass-deep sm:inline"
+          >
+            {t("home")}
+          </Link>
           <Link
             href="/shop"
             className="font-sans text-sm text-ink transition-colors hover:text-brass-deep"

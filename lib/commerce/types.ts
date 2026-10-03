@@ -70,9 +70,10 @@ export interface ChainLengthOption {
 
 /**
  * What a shopper must choose before a piece can be bought, already resolved
- * to concrete values (per-piece override -> "Ajustes del sitio" defaults ->
- * code defaults — see lib/commerce/options.ts). `none` means the piece is
- * bought as-is. Lives on the detail `Product` only: the listing summary never
+ * to concrete values. The KIND comes from the piece, or from its category when
+ * the piece says "inherit"; the VALUES from the per-piece override ->
+ * "Ajustes del sitio" defaults -> code defaults (see lib/commerce/options.ts).
+ * `none` means the piece is bought as-is. Lives on the detail `Product` only: the listing summary never
  * renders a picker, so it never carries (or serializes) these lists.
  */
 export type ProductOptions =

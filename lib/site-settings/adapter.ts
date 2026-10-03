@@ -3,6 +3,7 @@ import { sanityClient } from "@/lib/commerce/sanity/client";
 import type { Locale } from "@/lib/commerce/types";
 import { SHIPPING_FEE_QUERY, SITE_SETTINGS_QUERY } from "./queries";
 import type { SiteSettings } from "./types";
+import { normalizeWhatsappNumber } from "./whatsapp";
 
 export const SITE_SETTINGS_TAG = "site-settings";
 const SITE_SETTINGS_REVALIDATE_SECONDS = 60;
@@ -11,6 +12,7 @@ interface RawSiteSettings {
   logo: RawMediaItem | null;
   hero: RawMediaItem | null;
   heroAlt: string | null;
+  whatsappNumber?: string | null;
 }
 
 const EMPTY_SITE_SETTINGS: SiteSettings = {
@@ -22,14 +24,16 @@ const EMPTY_SITE_SETTINGS: SiteSettings = {
 /**
  * Reads the "siteSettings" singleton.
  *
- * Called from two Server Component sites in the same request — Header
- * (layout-level, every route) and the landing page's hero — rather than one
- * component fetching and "passing down": Next's App Router `children` slot
- * is an already-rendered subtree, so a layout cannot inject extra props into
- * the routed page segment. Both calls share the same ISR-tagged fetch (same
- * query/params/`next.tags`), so Next's request memoization + Data Cache
- * collapse them into one real Sanity round trip per request/build — "fetch
- * once" holds in practice even with two call sites.
+ * Called from several Server Component sites in the same request — Header
+ * and the locale layout (which feeds the cart drawer its WhatsApp number)
+ * on every route, plus the landing page's hero, the contact page and the
+ * checkout success page — rather than one component fetching and "passing
+ * down": Next's App Router `children` slot is an already-rendered subtree, so
+ * a layout cannot inject extra props into the routed page segment. All calls
+ * share the same ISR-tagged fetch (same query/params/`next.tags`), so Next's
+ * request memoization + Data Cache collapse them into one real Sanity round
+ * trip per request/build — "fetch once" holds in practice even with many
+ * call sites.
  *
  * Fails safe on ANY error (missing document, network failure, misconfigured
  * project) and returns an all-null SiteSettings — unlike lib/commerce's
@@ -58,6 +62,8 @@ export async function getSiteSettings(locale: Locale): Promise<SiteSettings> {
       logo: toMediaItem(raw.logo),
       hero: toMediaItem(raw.hero),
       heroAlt: raw.heroAlt ?? null,
+      // Digits only, 10-15 long, or undefined (no link is rendered).
+      whatsappNumber: normalizeWhatsappNumber(raw.whatsappNumber),
     };
   } catch {
     return EMPTY_SITE_SETTINGS;

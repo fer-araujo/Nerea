@@ -43,6 +43,7 @@ vi.mock("@/i18n/navigation", () => ({
 
 import { checkoutAction } from "@/lib/cart/checkout";
 import type { CartLineItem } from "@/lib/cart/cart-context";
+import { resolveProductOptions } from "@/lib/commerce/options";
 import type { Product } from "@/lib/commerce/types";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -525,6 +526,147 @@ describe("checkoutAction — purchase options", () => {
       soldHandles: [PENDANT_HANDLE],
     });
     expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+});
+
+// A piece's kind of option can come from its CATEGORY (a piece that never set
+// its own, or says "Según la categoría"). The action must validate against
+// exactly what the catalog resolved — built here with the real resolver, as the
+// Sanity adapter does — not against anything the cart claims.
+describe("checkoutAction — option resolved from the category", () => {
+  const inheritedFrom = (categoryPurchaseOption: string | undefined): Product => ({
+    ...SERVER_PRODUCT,
+    options: resolveProductOptions({
+      purchaseOption: undefined,
+      categoryPurchaseOption,
+    }),
+  });
+
+  beforeEach(() => {
+    getAvailabilityMock.mockImplementation(async (handles: string[]) =>
+      Object.fromEntries(handles.map((handle) => [handle, "available"])),
+    );
+    createCheckoutSessionMock.mockResolvedValue(
+      "https://checkout.stripe.com/c/test_session",
+    );
+  });
+
+  it("asks for a size on a piece that inherits a ring category: a line without one is rejected", async () => {
+    getProductByHandleMock.mockResolvedValue(inheritedFrom("ringSize"));
+
+    const result = await checkoutAction([LINE], "es");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid-option",
+      handles: [LINE.handle],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a size from the resolved list and sends only the validated copy to Stripe", async () => {
+    getProductByHandleMock.mockResolvedValue(inheritedFrom("ringSize"));
+
+    await checkoutAction(
+      [
+        {
+          ...LINE,
+          option: {
+            kind: "ringSize",
+            value: "7.5",
+            extra: -100000,
+          } as CartLineItem["option"],
+        },
+      ],
+      "es",
+    );
+
+    const [lines, session] = createCheckoutSessionMock.mock.calls[0];
+    expect(lines).toEqual([
+      {
+        name: `${SERVER_PRODUCT.title} — Talla 7.5`,
+        amount: SERVER_PRODUCT.price.amount,
+        quantity: 1,
+      },
+    ]);
+    expect(session.options).toEqual([
+      { handle: LINE.handle, option: { kind: "ringSize", value: "7.5" } },
+    ]);
+    expect(redirectMock).toHaveBeenCalledWith(
+      "https://checkout.stripe.com/c/test_session",
+    );
+  });
+
+  it.each<[string, unknown]>([
+    ["a size outside the resolved list", { kind: "ringSize", value: "99" }],
+    ["a chain length on an inherited ring", { kind: "chainLength", lengthCm: 45 }],
+  ])("rejects %s", async (_label, option) => {
+    getProductByHandleMock.mockResolvedValue(inheritedFrom("ringSize"));
+
+    const result = await checkoutAction(
+      [{ ...LINE, option } as unknown as CartLineItem],
+      "es",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid-option",
+      handles: [LINE.handle],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("validates a chain length against an inherited chain category, charging the catalog's extra", async () => {
+    getProductByHandleMock.mockResolvedValue(inheritedFrom("chainLength"));
+
+    await checkoutAction(
+      [{ ...LINE, option: { kind: "chainLength", lengthCm: 45 } }],
+      "es",
+    );
+
+    expect(createCheckoutSessionMock.mock.calls[0][0]).toEqual([
+      {
+        name: `${SERVER_PRODUCT.title} — Cadena 45 cm`,
+        amount: SERVER_PRODUCT.price.amount,
+        quantity: 1,
+      },
+    ]);
+  });
+
+  it("takes no option when the piece has no category (or its category has none): a size sent is rejected", async () => {
+    for (const categoryOption of [undefined, "none"]) {
+      createCheckoutSessionMock.mockClear();
+      getProductByHandleMock.mockResolvedValue(inheritedFrom(categoryOption));
+
+      const rejected = await checkoutAction(
+        [{ ...LINE, option: { kind: "ringSize", value: "7" } }],
+        "es",
+      );
+      expect(rejected).toEqual({
+        ok: false,
+        reason: "invalid-option",
+        handles: [LINE.handle],
+      });
+      expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+
+      await checkoutAction([LINE], "es");
+      expect(createCheckoutSessionMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("lets an explicit none on the piece beat a ring category: no option is asked for", async () => {
+    getProductByHandleMock.mockResolvedValue({
+      ...SERVER_PRODUCT,
+      options: resolveProductOptions({
+        purchaseOption: "none",
+        categoryPurchaseOption: "ringSize",
+      }),
+    });
+
+    await checkoutAction([LINE], "es");
+
+    expect(createCheckoutSessionMock).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionMock.mock.calls[0][1].options).toEqual([]);
   });
 });
 

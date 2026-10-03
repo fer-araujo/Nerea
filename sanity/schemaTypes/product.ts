@@ -1,5 +1,8 @@
 import { defineField, defineType } from "sanity";
-import { DEFAULT_RING_SIZES } from "../../lib/commerce/options";
+import {
+  DEFAULT_RING_SIZES,
+  INHERIT_PURCHASE_OPTION,
+} from "../../lib/commerce/options";
 
 // One document per physical piece (one-of-one model, see design.md ADR-2 /
 // Commerce Data Layer). Title/description are field-level bilingual objects
@@ -101,25 +104,30 @@ export const product = defineType({
         }),
       ],
     }),
-    // What the shopper must pick before paying. The two lists below are
-    // OPTIONAL per-piece overrides: left empty, the storefront uses the
-    // defaults in "Ajustes del sitio" (and, failing that, built-in ones) —
-    // see lib/commerce/options.ts for the resolution order.
+    // What the shopper must pick before paying. "Según la categoría" (the
+    // default) takes the choice from the piece's category (category.ts), which
+    // is also what a piece with no value at all does — every document created
+    // before this option existed; the three explicit values override it, "Ninguna"
+    // included. The two lists below are OPTIONAL per-piece overrides of the
+    // VALUES: left empty, the storefront uses the defaults in "Ajustes del sitio"
+    // (and, failing that, built-in ones) — see lib/commerce/options.ts for both
+    // resolution orders.
     defineField({
       name: "purchaseOption",
       title: "Opción de compra",
       description:
-        "Lo que debe elegir quien compra antes de pagar. Los anillos piden talla; los dijes con cadena piden el largo.",
+        'Lo que debe elegir quien compra antes de pagar. Los anillos piden talla; los dijes con cadena piden el largo. "Según la categoría" usa la opción que tenga la categoría de la pieza.',
       type: "string",
       options: {
         list: [
+          { title: "Según la categoría", value: INHERIT_PURCHASE_OPTION },
           { title: "Ninguna", value: "none" },
           { title: "Talla de anillo", value: "ringSize" },
           { title: "Largo de cadena", value: "chainLength" },
         ],
         layout: "radio",
       },
-      initialValue: "none",
+      initialValue: INHERIT_PURCHASE_OPTION,
     }),
     defineField({
       name: "ringSizes",

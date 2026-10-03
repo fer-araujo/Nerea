@@ -142,6 +142,28 @@ in Sanity is not a failure. Marking sold is idempotent and the sale is create-on
 so a retry is safe. Signature verification is unchanged and still runs first. An
 online sale cannot be voided from the panel (refund it in Stripe).
 
+### Resumen and Respaldo
+
+The panel's home page, behind the same session check:
+
+- **Resumen** — the KPIs of a period (this month / last month / this year, Mexico
+  time): **Ventas**, **Costo de lo vendido**, **Utilidad bruta** (with its margin;
+  red when negative), **Inversiones**, **Flujo** (ventas − inversiones), the value
+  of the inventory, pieces available / sold, unread messages and the sales still
+  waiting for a cost — plus a chart of the last 12 months (empty months included)
+  with a "Ver como tabla" view of the same numbers. One read of the sales and
+  purchases (the period plus those 12 months) feeds the cards and the chart, in
+  cursor-paged batches of 500, newest first, single-field queries only (still no
+  composite index). A read that reaches its cap is never hidden: the page shows
+  **Datos parciales** and says which figures are affected.
+- **Descargar respaldo** — `GET /admin/api/export` (admin only, `401` JSON
+  otherwise) downloads every collection as one JSON file,
+  `nerea-respaldo-YYYY-MM-DD.json` (Mexico date): materials with their
+  `movements`, purchases, castings, pieces, sales, contact messages and the audit
+  log. Timestamps are ISO strings, `Cache-Control: no-store`, nothing is logged.
+  **It contains visitors' personal data** (the contact inbox): keep it somewhere
+  safe. The charts use `recharts`, loaded only on this page.
+
 ## Testing and CI
 
 ```bash

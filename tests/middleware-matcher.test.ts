@@ -22,6 +22,8 @@ describe("middleware matcher pattern", () => {
     "/admin",
     "/admin/login",
     "/admin/mensajes",
+    // The backup download: a route handler under /admin, not locale-routed.
+    "/admin/api/export",
   ])("excludes %s", (pathname) => {
     expect(matcherRegex.test(pathname)).toBe(false);
   });

@@ -10,7 +10,10 @@
 //     the movements ledger append-only);
 //   - a query that would need a composite index (an equality filter combined
 //     with a range/orderBy, or a range/orderBy spanning two fields) throws,
-//     like Firestore's FAILED_PRECONDITION "requires an index" error.
+//     like Firestore's FAILED_PRECONDITION "requires an index" error;
+//   - a `startAfter(document)` cursor needs the document to carry every field
+//     the query orders by (so a `select()` that drops one throws, as the real
+//     SDK does), and resumes right after THAT document, never after a value.
 //
 // It is a test helper, not a test: vitest only collects *.test.ts(x).
 
@@ -44,6 +47,10 @@ export interface QueryRecord {
   offset: number | undefined;
   limit: number | undefined;
   select: string[] | undefined;
+  /** Path of the cursor document, only on a query that used `startAfter`. */
+  startAfter?: string;
+  /** Only on a query that was turned into an aggregation with `count()`. */
+  aggregate?: "count";
 }
 
 function clone<T>(value: T): T {
@@ -209,6 +216,30 @@ export class FakeQuery {
     return this.next({ select: fields });
   }
 
+  /** Resumes right AFTER `cursor`, a document of this same query. */
+  startAfter(cursor: FakeSnapshot): FakeQuery {
+    const data = cursor.data() ?? {};
+    const needed = [
+      ...this.state.orderBys.map((order) => order.field),
+      ...this.state.wheres
+        .filter((where) => where.op !== "==")
+        .map((where) => where.field),
+    ];
+    for (const field of needed) {
+      if (data[field] === undefined) {
+        throw new Error(
+          `Field "${field}" is missing in the provided DocumentSnapshot. Please provide a document that contains values for all specified orderBy() and where() constraints.`,
+        );
+      }
+    }
+    return this.next({ startAfter: cursor.ref.path });
+  }
+
+  /** The count aggregation: `.count().get()` answers `{ data().count }`. */
+  count(): FakeCountQuery {
+    return new FakeCountQuery(this.next({ aggregate: "count" }));
+  }
+
   async get(): Promise<{ docs: FakeSnapshot[] }> {
     const record: QueryRecord = { collection: this.collectionPath, ...this.state };
     assertNoCompositeIndex(record);
@@ -231,6 +262,14 @@ export class FakeQuery {
       });
     }
 
+    if (record.startAfter !== undefined) {
+      const cursorAt = entries.findIndex(({ path }) => path === record.startAfter);
+      if (cursorAt === -1) {
+        throw new Error("startAfter: the cursor document is not in this query.");
+      }
+      entries = entries.slice(cursorAt + 1);
+    }
+
     const start = record.offset ?? 0;
     const end = record.limit === undefined ? undefined : start + record.limit;
     return {
@@ -241,6 +280,15 @@ export class FakeQuery {
             new FakeSnapshot(new FakeDocRef(this.db, path), data, record.select),
         ),
     };
+  }
+}
+
+export class FakeCountQuery {
+  constructor(private readonly query: FakeQuery) {}
+
+  async get(): Promise<{ data(): { count: number } }> {
+    const { docs } = await this.query.get();
+    return { data: () => ({ count: docs.length }) };
   }
 }
 

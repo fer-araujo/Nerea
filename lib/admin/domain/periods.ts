@@ -133,7 +133,8 @@ export function mexicoDateToInstant(text: string): Date {
   return startOfMexicoDay(civil);
 }
 
-function firstOfMonth(year: number, month: number): CivilDate {
+/** The 1st of a month as a CivilDate; `month` may overflow or underflow. */
+export function firstOfMonth(year: number, month: number): CivilDate {
   // Normalise month overflow/underflow (month 0 = December of the year before).
   const index = year * 12 + (month - 1);
   return { year: Math.floor(index / 12), month: (index % 12) + 1, day: 1 };

@@ -15,6 +15,9 @@ export const COLLECTIONS = {
   pieces: "pieces",
   sales: "sales",
   auditLog: "auditLog",
+  // The contact-form inbox (contact-messages.ts). It is the one collection
+  // here that holds visitors' personal data.
+  contactMessages: "contactMessages",
 } as const;
 
 // Auto-generated Firestore ids are 20 alphanumerics; this allows any sane

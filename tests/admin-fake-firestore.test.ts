@@ -128,3 +128,89 @@ describe("fake Firestore strictness", () => {
     expect(result.docs[0].data()).toEqual({ totalCost: 5 });
   });
 });
+
+describe("fake Firestore cursors and counts", () => {
+  function seedSales(db: FakeFirestore) {
+    // Three sales share one date, as sales of the same business day do.
+    db.seed("sales/a", { date: new FakeTimestamp(new Date("2026-10-03T06:00:00Z")), n: 1 });
+    db.seed("sales/b", { date: new FakeTimestamp(new Date("2026-10-02T06:00:00Z")), n: 2 });
+    db.seed("sales/c", { date: new FakeTimestamp(new Date("2026-10-02T06:00:00Z")), n: 3 });
+    db.seed("sales/d", { date: new FakeTimestamp(new Date("2026-10-02T06:00:00Z")), n: 4 });
+    db.seed("sales/e", { date: new FakeTimestamp(new Date("2026-10-01T06:00:00Z")), n: 5 });
+  }
+
+  it("resumes right after the cursor DOCUMENT, so documents sharing a sort value are neither skipped nor repeated", async () => {
+    const db = new FakeFirestore();
+    seedSales(db);
+    const ordered = db.collection("sales").orderBy("date", "desc");
+
+    const first = await ordered.limit(2).get();
+    const second = await ordered.startAfter(first.docs[1]).limit(2).get();
+    const third = await ordered.startAfter(second.docs[1]).limit(2).get();
+
+    const ids = [...first.docs, ...second.docs, ...third.docs].map((doc) => doc.id);
+    expect(ids).toHaveLength(5);
+    expect(new Set(ids).size).toBe(5);
+    expect(third.docs).toHaveLength(1);
+  });
+
+  it("records the cursor on the query", async () => {
+    const db = new FakeFirestore();
+    seedSales(db);
+    const ordered = db.collection("sales").orderBy("date");
+    const first = await ordered.limit(1).get();
+
+    await ordered.startAfter(first.docs[0]).get();
+
+    expect(db.queries[1].startAfter).toBe(first.docs[0].ref.path);
+  });
+
+  it("refuses a cursor document that lacks a field the query orders by, like the real SDK", async () => {
+    const db = new FakeFirestore();
+    seedSales(db);
+    const projected = db.collection("sales").orderBy("date").select("n");
+    const first = await projected.limit(1).get();
+
+    // `select("n")` dropped `date`, which the query is ordered by.
+    expect(() => projected.startAfter(first.docs[0])).toThrow(
+      /Field "date" is missing in the provided DocumentSnapshot/,
+    );
+  });
+
+  it("refuses a cursor document that is not in the query", async () => {
+    const db = new FakeFirestore();
+    seedSales(db);
+    db.seed("sales/z", { date: new FakeTimestamp(new Date("2025-01-01T06:00:00Z")), n: 9 });
+    const outside = await db
+      .collection("sales")
+      .where("date", ">=", new FakeTimestamp(new Date("2025-01-01T00:00:00Z")))
+      .orderBy("date")
+      .limit(1)
+      .get();
+
+    await expect(
+      db
+        .collection("sales")
+        .where("date", ">=", new FakeTimestamp(new Date("2026-01-01T00:00:00Z")))
+        .orderBy("date")
+        .startAfter(outside.docs[0])
+        .get(),
+    ).rejects.toThrow(/cursor document is not in this query/);
+  });
+
+  it("counts the documents that match, with an equality filter alone", async () => {
+    const db = new FakeFirestore();
+    db.seed("contactMessages/a", { read: false });
+    db.seed("contactMessages/b", { read: true });
+    db.seed("contactMessages/c", { read: false });
+
+    const snapshot = await db
+      .collection("contactMessages")
+      .where("read", "==", false)
+      .count()
+      .get();
+
+    expect(snapshot.data().count).toBe(2);
+    expect(db.queries[0].aggregate).toBe("count");
+  });
+});

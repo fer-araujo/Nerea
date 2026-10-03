@@ -5,6 +5,7 @@ import {
   DEFAULT_CHAIN_LENGTHS,
   DEFAULT_RING_SIZES,
   formatOptionLabel,
+  parseSerializedOptions,
   resolveProductOptions,
   serializeOption,
   validateOption,
@@ -523,5 +524,50 @@ describe("serializeOption", () => {
     expect(
       serializeOption("dije", { kind: "chainLength", lengthCm: 45 }),
     ).toBe("dije:chain=45");
+  });
+});
+
+describe("parseSerializedOptions", () => {
+  it("reads back what serializeOption wrote, per handle", () => {
+    const raw = [
+      serializeOption("anillo-luna", { kind: "ringSize", value: "7.5" }),
+      serializeOption("dije-sol", { kind: "chainLength", lengthCm: 45 }),
+    ].join(",");
+
+    const options = parseSerializedOptions(raw);
+
+    expect(options.get("anillo-luna")).toEqual({ kind: "ringSize", value: "7.5" });
+    expect(options.get("dije-sol")).toEqual({ kind: "chainLength", lengthCm: 45 });
+    expect(options.size).toBe(2);
+  });
+
+  it.each([undefined, null, ""])("is empty for %j", (raw) => {
+    expect(parseSerializedOptions(raw).size).toBe(0);
+  });
+
+  it("skips entries that do not parse instead of throwing", () => {
+    const options = parseSerializedOptions(
+      [
+        "no-colon",
+        "anillo:color=red", // unknown kind
+        "anillo:size=", // blank value
+        ":size=7", // no handle
+        "dije:chain=abc", // not a number
+        "dije:chain=-5", // not positive
+        "dije:chain=0",
+        "ok-ring:size=6",
+        "dije:chain=4", // cut off by Stripe's cap: still a number, still accepted
+      ].join(","),
+    );
+
+    expect([...options.keys()].sort()).toEqual(["dije", "ok-ring"]);
+    expect(options.get("ok-ring")).toEqual({ kind: "ringSize", value: "6" });
+  });
+
+  it("tolerates spaces around entries", () => {
+    const options = parseSerializedOptions(" a:size=7 , b:chain=40 ");
+
+    expect(options.get("a")).toEqual({ kind: "ringSize", value: "7" });
+    expect(options.get("b")).toEqual({ kind: "chainLength", lengthCm: 40 });
   });
 });

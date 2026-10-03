@@ -35,3 +35,12 @@ export const NOTICE_INFO_CLASS =
 
 /** Figures: mono, with digits that line up in a column. */
 export const NUMBER_CLASS = "font-mono tabular-nums";
+
+// A small label on a row ("Manual", "Costo pendiente"): a hairline box, the
+// same mono caps as the field labels. Meaning never rides on color alone — the
+// words carry it — so the attention variant only darkens the border.
+export const BADGE_CLASS =
+  "inline-flex items-center border border-line px-2 py-0.5 font-mono text-[11px] uppercase tracking-[0.14em] text-graphite";
+
+export const BADGE_ATTENTION_CLASS =
+  "inline-flex items-center border border-brass-deep px-2 py-0.5 font-mono text-[11px] uppercase tracking-[0.14em] text-ink";

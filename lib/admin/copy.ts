@@ -5,6 +5,7 @@ import type {
   MovementType,
 } from "./domain/inventory";
 import type { MaterialUnit } from "./domain/quantity";
+import type { SaleSource } from "./domain/sales";
 
 // Spanish vocabulary for the admin modules. The panel is a single-language
 // surface outside next-intl (see LoginForm), so its copy is plain constants.
@@ -36,6 +37,11 @@ export const ADJUSTMENT_KIND_LABELS: Readonly<Record<AdjustmentKind, string>> =
     adjustment: "Corrección (suma o resta)",
     loss: "Merma (solo resta)",
   };
+
+export const SALE_SOURCE_LABELS: Readonly<Record<SaleSource, string>> = {
+  stripe: "Tienda en línea",
+  manual: "Manual",
+};
 
 const CASTING_SUBJECTS: Readonly<Record<CastingField, string>> = {
   waxGrams: "El peso de cera",

@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // A layout's redirect does NOT stop its page: Next renders a layout and the
 // pages under it in parallel, so a page that reads data has to authorize
-// itself. These tests pin that for the three inventory pages (Calculadora,
-// Inventario, Inversiones) exactly like tests/admin-page-guards.test.ts does
-// for Mensajes: requireAdmin() redirects (it THROWS, like Next's real
+// itself. These tests pin that for the module pages (Calculadora, Inventario,
+// Inversiones, Piezas, Ventas) exactly like tests/admin-page-guards.test.ts
+// does for Mensajes: requireAdmin() redirects (it THROWS, like Next's real
 // redirect) and the data layer must never be queried.
 vi.mock("server-only", () => ({}));
 
@@ -28,8 +28,28 @@ vi.mock("@/lib/admin/data/purchases", () => ({
   sumPurchases: (...args: unknown[]) => sumPurchasesMock(...args),
 }));
 
+const listCatalogMock = vi.fn();
+vi.mock("@/lib/admin/data/catalog", () => ({
+  CATALOG_LIMIT: 500,
+  listCatalog: (...args: unknown[]) => listCatalogMock(...args),
+}));
+
+const listPiecesMock = vi.fn();
+vi.mock("@/lib/admin/data/pieces", () => ({
+  listPieces: (...args: unknown[]) => listPiecesMock(...args),
+}));
+
+const listSalesMock = vi.fn();
+const sumSalesMock = vi.fn();
+vi.mock("@/lib/admin/data/sales", () => ({
+  SALES_SUM_LIMIT: 2000,
+  listSales: (...args: unknown[]) => listSalesMock(...args),
+  sumSales: (...args: unknown[]) => sumSalesMock(...args),
+}));
+
 // Server Actions are irrelevant here (and pull in next/cache); their own
-// authorization is covered in tests/admin-inventory-actions.test.ts.
+// authorization is covered in tests/admin-inventory-actions.test.ts and
+// tests/admin-pieces-sales-actions.test.ts.
 vi.mock("@/app/admin/(panel)/calculadora/actions", () => ({
   registerCastingAction: vi.fn(),
 }));
@@ -40,6 +60,13 @@ vi.mock("@/app/admin/(panel)/inventario/actions", () => ({
 vi.mock("@/app/admin/(panel)/inversiones/actions", () => ({
   recordPurchaseAction: vi.fn(),
 }));
+vi.mock("@/app/admin/(panel)/piezas/actions", () => ({
+  savePieceCostAction: vi.fn(),
+}));
+vi.mock("@/app/admin/(panel)/ventas/actions", () => ({
+  recordManualSaleAction: vi.fn(),
+  voidSaleAction: vi.fn(),
+}));
 vi.mock("@/app/admin/(panel)/actions", () => ({ logoutAction: vi.fn() }));
 vi.mock("@/components/admin/AdminShell", () => ({
   AdminShell: (props: { children: unknown }) => props.children,
@@ -49,6 +76,8 @@ import AdminPanelLayout from "@/app/admin/(panel)/layout";
 import AdminCalculatorPage from "@/app/admin/(panel)/calculadora/page";
 import AdminInventoryPage from "@/app/admin/(panel)/inventario/page";
 import AdminInvestmentsPage from "@/app/admin/(panel)/inversiones/page";
+import AdminPiecesPage from "@/app/admin/(panel)/piezas/page";
+import AdminSalesPage from "@/app/admin/(panel)/ventas/page";
 
 const REDIRECT = "NEXT_REDIRECT /admin/login";
 const ADMIN = { uid: "uid-1", email: "admin@example.com" };
@@ -58,6 +87,10 @@ const DATA_MOCKS = [
   listMovementsMock,
   listPurchasesMock,
   sumPurchasesMock,
+  listCatalogMock,
+  listPiecesMock,
+  listSalesMock,
+  sumSalesMock,
 ];
 
 function expectNoDataAccess() {
@@ -87,7 +120,31 @@ const PAGES: Array<{
     render: () => AdminInvestmentsPage({ searchParams: Promise.resolve({}) }),
     reads: () => [listPurchasesMock, sumPurchasesMock, listMaterialsMock],
   },
+  {
+    // The materials only feed the metal helper of the edit form, so they are
+    // read only when a piece is selected (see "Piezas page: search params").
+    name: "Piezas",
+    render: () => AdminPiecesPage({ searchParams: Promise.resolve({}) }),
+    reads: () => [listCatalogMock, listPiecesMock],
+  },
+  {
+    name: "Ventas",
+    render: () => AdminSalesPage({ searchParams: Promise.resolve({}) }),
+    reads: () => [listSalesMock, sumSalesMock, listCatalogMock],
+  },
 ];
+
+const EMPTY_TOTALS = {
+  count: 0,
+  voidedCount: 0,
+  subtotal: 0,
+  shipping: 0,
+  total: 0,
+  costOfGoods: 0,
+  grossProfit: 0,
+  pendingCount: 0,
+  truncated: false,
+};
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -97,6 +154,10 @@ beforeEach(() => {
   listMovementsMock.mockResolvedValue({ movements: [], hasNextPage: false });
   listPurchasesMock.mockResolvedValue({ purchases: [], hasNextPage: false });
   sumPurchasesMock.mockResolvedValue({ totalCost: 0, count: 0, truncated: false });
+  listCatalogMock.mockResolvedValue({ products: [], truncated: false });
+  listPiecesMock.mockResolvedValue([]);
+  listSalesMock.mockResolvedValue({ sales: [], hasNextPage: false });
+  sumSalesMock.mockResolvedValue(EMPTY_TOTALS);
 });
 
 afterEach(() => {
@@ -235,6 +296,95 @@ describe("Inversiones page: period and page params", () => {
       await AdminInvestmentsPage({ searchParams: Promise.resolve({ page }) });
 
       expect(listPurchasesMock.mock.calls[0][1]).toBe(1);
+    },
+  );
+});
+
+describe("Piezas page: search params", () => {
+  beforeEach(() => {
+    requireAdminMock.mockResolvedValue(ADMIN);
+  });
+
+  it("reads the materials only to edit a piece", async () => {
+    await AdminPiecesPage({ searchParams: Promise.resolve({}) });
+    expect(listMaterialsMock).not.toHaveBeenCalled();
+
+    await AdminPiecesPage({ searchParams: Promise.resolve({ pieza: "anillo-luna" }) });
+    expect(listMaterialsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a path-like handle", "a/b/c"],
+    ["a parent escape", "../secrets"],
+    ["an empty handle", ""],
+    ["an overlong handle", "a".repeat(129)],
+    ["a reserved handle", "__x__"],
+  ])("ignores %s without reading the materials", async (_label, pieza) => {
+    await AdminPiecesPage({ searchParams: Promise.resolve({ pieza }) });
+
+    expect(listMaterialsMock).not.toHaveBeenCalled();
+  });
+
+  it("still lists the catalog and the costs when the materials cannot be read", async () => {
+    listMaterialsMock.mockRejectedValue(new Error("5 NOT_FOUND"));
+
+    await expect(
+      AdminPiecesPage({ searchParams: Promise.resolve({ pieza: "anillo-luna" }) }),
+    ).resolves.toBeDefined();
+    expect(listCatalogMock).toHaveBeenCalledTimes(1);
+    expect(listPiecesMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Ventas page: period and page params", () => {
+  beforeEach(() => {
+    requireAdminMock.mockResolvedValue(ADMIN);
+    // 2026-10-02 12:00 in Mexico City.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-02T18:00:00Z"));
+  });
+
+  it("defaults to this month, in Mexico time, and totals the same range it lists", async () => {
+    await AdminSalesPage({ searchParams: Promise.resolve({}) });
+
+    const [range, page] = listSalesMock.mock.calls[0];
+    expect((range as { start: Date }).start.toISOString()).toBe("2026-10-01T06:00:00.000Z");
+    expect((range as { end: Date }).end.toISOString()).toBe("2026-11-01T06:00:00.000Z");
+    expect(page).toBe(1);
+    expect(sumSalesMock).toHaveBeenCalledWith(range);
+  });
+
+  it("honours last month and this year and the page number", async () => {
+    await AdminSalesPage({
+      searchParams: Promise.resolve({ period: "last-month", page: "2" }),
+    });
+    const [lastMonth, page] = listSalesMock.mock.calls[0];
+    expect((lastMonth as { start: Date }).start.toISOString()).toBe("2026-09-01T06:00:00.000Z");
+    expect(page).toBe(2);
+
+    listSalesMock.mockClear();
+    await AdminSalesPage({ searchParams: Promise.resolve({ period: "this-year" }) });
+    const [thisYear] = listSalesMock.mock.calls[0];
+    expect((thisYear as { start: Date }).start.toISOString()).toBe("2026-01-01T06:00:00.000Z");
+    expect((thisYear as { end: Date }).end.toISOString()).toBe("2027-01-01T06:00:00.000Z");
+  });
+
+  it.each(["forever", "", "__proto__"])(
+    "falls back to this month for the unknown period %j",
+    async (period) => {
+      await AdminSalesPage({ searchParams: Promise.resolve({ period }) });
+
+      const [range] = listSalesMock.mock.calls[0];
+      expect((range as { start: Date }).start.toISOString()).toBe("2026-10-01T06:00:00.000Z");
+    },
+  );
+
+  it.each(["0", "-2", "abc", "1.5"])(
+    "falls back to the first page for the page %j",
+    async (page) => {
+      await AdminSalesPage({ searchParams: Promise.resolve({ page }) });
+
+      expect(listSalesMock.mock.calls[0][1]).toBe(1);
     },
   );
 });

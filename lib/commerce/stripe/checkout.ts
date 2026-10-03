@@ -131,6 +131,13 @@ export async function createCheckoutSession(
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
+    // Card only, enforced HERE and not left to the Stripe Dashboard's payment-
+    // method settings (which anyone with Dashboard access could widen). Pieces
+    // are one-of-one: one "bought" with a delayed method (an OXXO voucher, a
+    // bank transfer) would sit in limbo, and the webhook sells a piece only
+    // once payment is confirmed (app/api/stripe/webhook/route.ts) — so it would
+    // stay buyable by everyone else, or be held for a voucher nobody pays.
+    payment_method_types: ["card"],
     line_items: lines.map((line) => ({
       price_data: {
         currency: "mxn",

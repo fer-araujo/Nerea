@@ -10,6 +10,10 @@ export const COLLECTIONS = {
   movements: "movements",
   purchases: "purchases",
   castings: "castings",
+  // `pieces/{handle}`: the cost side of a catalog piece, keyed by its Sanity
+  // slug so the webhook and the pages can address it without a lookup.
+  pieces: "pieces",
+  sales: "sales",
   auditLog: "auditLog",
 } as const;
 
@@ -20,6 +24,35 @@ export const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 export function isDocumentId(value: unknown): value is string {
   return typeof value === "string" && DOCUMENT_ID_PATTERN.test(value);
+}
+
+// Firestore reserves every id that starts AND ends with two underscores
+// (`__name__`) and rejects it with an error. A piece document is keyed by a
+// catalog slug, which never looks like that, but this is the one place that
+// decides whether a handle may become an id, so the case is closed here.
+const RESERVED_ID_PATTERN = /^__.*__$/;
+
+/** A catalog handle that can safely be used as a `pieces/{handle}` id. */
+export function isPieceHandle(value: unknown): value is string {
+  return isDocumentId(value) && !RESERVED_ID_PATTERN.test(value);
+}
+
+/**
+ * Whether a write failed because the document it `create`s is already there
+ * (gRPC code 6). The Admin SDK reports it as `code: 6` with a message that
+ * starts "6 ALREADY_EXISTS"; both are checked so a change in either shape
+ * doesn't turn a harmless duplicate into a failure.
+ */
+export function isAlreadyExistsError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return (
+    code === 6 ||
+    code === "already-exists" ||
+    (typeof message === "string" && message.includes("ALREADY_EXISTS"))
+  );
 }
 
 // Documents are only ever written by these modules, but they are also

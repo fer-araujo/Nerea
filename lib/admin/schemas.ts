@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { DOCUMENT_ID_PATTERN } from "@/lib/admin/data/shared";
+import { DOCUMENT_ID_PATTERN, isPieceHandle } from "@/lib/admin/data/shared";
 import {
   GOLD_COLORS,
   METAL_KEYS,
@@ -18,6 +18,7 @@ import {
   parseIsoDate,
 } from "@/lib/admin/domain/periods";
 import { MATERIAL_UNITS } from "@/lib/admin/domain/quantity";
+import { MAX_SALE_ITEMS } from "@/lib/admin/domain/sales";
 
 // Boundary validation for the inventory Server Actions. A Server Action is a
 // public POST endpoint, so nothing in a FormData is trusted: every field is
@@ -99,6 +100,25 @@ function optionalDocumentId(label: string) {
     (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
     documentId(label).optional(),
   );
+}
+
+/** A catalog handle: the key of a piece's cost document, so it must be a safe id. */
+function pieceHandle(label: string) {
+  return z
+    .string({ error: `${label}: elige una pieza.` })
+    .refine((value) => isPieceHandle(value), {
+      error: `${label}: elige una pieza válida.`,
+    });
+}
+
+// A blank text field means "not provided".
+function blankAsMissing(value: unknown): unknown {
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
+}
+
+/** Pesos, optional: a blank field is `undefined`, anything else must be valid. */
+function optionalMoneyText(label: string, options: { max: number }) {
+  return z.preprocess(blankAsMissing, moneyText(label, options).optional());
 }
 
 function dateText(label: string) {
@@ -207,3 +227,94 @@ export const registerCastingSchema = z
     path: ["color"],
     error: "Color: elige el color del oro.",
   });
+
+// ---- piezas ------------------------------------------------------------
+
+/** Ceiling for any single cost of a piece, in pesos. */
+const MAX_PIECE_COST_PESOS = 10_000_000;
+
+export const savePieceCostSchema = z
+  .object({
+    handle: pieceHandle("Pieza"),
+    // Blank = not provided; metal, stones and other then count as 0 and labor
+    // as absent. At least one must be typed, so an accidental empty save can't
+    // record a piece as free to make.
+    metal: optionalMoneyText("Metal", { max: MAX_PIECE_COST_PESOS }),
+    stones: optionalMoneyText("Piedras", { max: MAX_PIECE_COST_PESOS }),
+    other: optionalMoneyText("Otros", { max: MAX_PIECE_COST_PESOS }),
+    labor: optionalMoneyText("Mano de obra", { max: MAX_PIECE_COST_PESOS }),
+    // What "Calcular metal" used; informational, stored beside the cost.
+    metalGrams: z.preprocess(
+      blankAsMissing,
+      positiveDecimal("Gramos de metal", { maxDecimals: 3, max: 100_000 }).optional(),
+    ),
+    materialId: optionalDocumentId("Material"),
+    note: optionalText("Nota", 300),
+  })
+  .refine(
+    (value) =>
+      [value.metal, value.stones, value.other, value.labor].some(
+        (cost) => cost !== undefined,
+      ),
+    {
+      path: ["metal"],
+      error: "Costos: escribe al menos un costo (puede ser 0).",
+    },
+  )
+  .transform(
+    ({ handle, metal, stones, other, labor, metalGrams, materialId, note }) => ({
+      handle,
+      costs: {
+        metal: metal ?? 0,
+        stones: stones ?? 0,
+        other: other ?? 0,
+        ...(labor !== undefined ? { labor } : {}),
+      },
+      ...(metalGrams !== undefined ? { metalGrams } : {}),
+      ...(materialId !== undefined ? { materialId } : {}),
+      ...(note !== undefined ? { note } : {}),
+    }),
+  );
+
+// ---- ventas ------------------------------------------------------------
+
+const saleItemSchema = z.object({
+  handle: pieceHandle("Pieza"),
+  // Editable on purpose (a discount), so it is validated like any amount; the
+  // catalog price is only the form's starting value.
+  price: moneyText("Precio", { max: MAX_PIECE_COST_PESOS }),
+  option: optionalText("Opción", 60),
+});
+
+export const recordManualSaleSchema = z
+  .object({
+    date: dateText("Fecha"),
+    // Optional: blank, or not sent at all, means no shipping was charged.
+    shipping: z.preprocess(
+      (value) =>
+        value === undefined || (typeof value === "string" && value.trim() === "")
+          ? "0"
+          : value,
+      moneyText("Envío", { max: 100_000 }),
+    ),
+    note: optionalText("Nota", 300),
+    markSold: z.boolean(),
+    items: z
+      .array(saleItemSchema, { error: "Agrega al menos una pieza." })
+      .min(1, { error: "Agrega al menos una pieza." })
+      .max(MAX_SALE_ITEMS, {
+        error: `Máximo ${MAX_SALE_ITEMS} piezas por venta.`,
+      }),
+  })
+  .refine(
+    (value) =>
+      new Set(value.items.map((item) => item.handle)).size === value.items.length,
+    {
+      path: ["items"],
+      error: "Una pieza no puede repetirse en la misma venta.",
+    },
+  );
+
+export const voidSaleSchema = z.object({
+  saleId: documentId("Venta"),
+});

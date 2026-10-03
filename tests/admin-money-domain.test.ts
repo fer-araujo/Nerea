@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  centavosToPesosText,
   formatMXN,
   inventoryValue,
   isCentavos,
@@ -185,4 +186,30 @@ describe("quantity helpers", () => {
     expect(formatDecimal(0.41666)).toBe("0.417");
     expect(formatDecimal(0.41666, 5)).toBe("0.41666");
   });
+});
+
+describe("centavosToPesosText", () => {
+  it.each([
+    [0, "0.00"],
+    [5, "0.05"],
+    [100, "1.00"],
+    [123_456, "1234.56"],
+    [185_000, "1850.00"],
+    [9_999_999_999, "99999999.99"],
+  ])("writes %i centavos as %s pesos", (centavos, text) => {
+    expect(centavosToPesosText(centavos)).toBe(text);
+  });
+
+  it("round-trips through pesosToCentavos", () => {
+    for (const centavos of [1, 99, 101, 123_457, 10_000_000]) {
+      expect(pesosToCentavos(Number(centavosToPesosText(centavos)))).toBe(centavos);
+    }
+  });
+
+  it.each([-1, 1.5, Number.NaN, Infinity])(
+    "answers 0.00 for something that is not whole non-negative centavos (%s)",
+    (value) => {
+      expect(centavosToPesosText(value)).toBe("0.00");
+    },
+  );
 });

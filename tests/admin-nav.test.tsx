@@ -26,6 +26,8 @@ describe("AdminNav", () => {
       ["Calculadora", "/admin/calculadora"],
       ["Inventario", "/admin/inventario"],
       ["Inversiones", "/admin/inversiones"],
+      ["Piezas", "/admin/piezas"],
+      ["Ventas", "/admin/ventas"],
       ["Mensajes", "/admin/mensajes"],
     ]);
   });
@@ -42,6 +44,10 @@ describe("AdminNav", () => {
     ["/admin/inventario", "Inventario"],
     ["/admin/inventario/anything", "Inventario"],
     ["/admin/inversiones", "Inversiones"],
+    ["/admin/piezas", "Piezas"],
+    ["/admin/piezas/anything", "Piezas"],
+    ["/admin/ventas", "Ventas"],
+    ["/admin/ventas/anything", "Ventas"],
     ["/admin/mensajes", "Mensajes"],
   ])("marks %s as the current section", (pathname, label) => {
     pathnameMock.mockReturnValue(pathname);
@@ -53,7 +59,7 @@ describe("AdminNav", () => {
     expect(current.map((link) => link.textContent)).toEqual([label]);
   });
 
-  it("scrolls horizontally instead of wrapping, so five tabs stay one line at 360px", () => {
+  it("scrolls horizontally instead of wrapping, so seven tabs stay one line at 360px", () => {
     render(<AdminNav />);
 
     expect(screen.getByRole("navigation", { name: "Secciones del panel" })).toHaveClass(

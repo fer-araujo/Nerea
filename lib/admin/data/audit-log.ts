@@ -10,9 +10,17 @@ export type AuditAction =
   | "material.create"
   | "stock.adjust"
   | "purchase.record"
-  | "casting.record";
+  | "casting.record"
+  | "piece.update"
+  | "sale.record"
+  | "sale.void";
 
-export type AuditEntity = "material" | "purchase" | "casting";
+export type AuditEntity =
+  | "material"
+  | "purchase"
+  | "casting"
+  | "piece"
+  | "sale";
 
 export interface AuditEntry {
   /** Opaque uid of the admin who did it, never an email address. */

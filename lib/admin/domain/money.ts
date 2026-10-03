@@ -17,6 +17,20 @@ export function pesosToCentavos(pesos: number): number {
   return roundTo(pesos * 100);
 }
 
+/**
+ * Integer centavos -> the text a form field takes back as pesos: 123456 ->
+ * "1234.56". Pure integer math (no float division), so it can never print a
+ * rounding artefact; anything that isn't a non-negative safe integer is "0.00".
+ */
+export function centavosToPesosText(centavos: number): string {
+  if (!isCentavos(centavos)) {
+    return "0.00";
+  }
+  const pesos = Math.floor(centavos / 100);
+  const cents = centavos % 100;
+  return `${pesos}.${String(cents).padStart(2, "0")}`;
+}
+
 /** Cost of ONE unit from a purchase line: whole-centavo, rounded half up. */
 export function unitCostFromTotal(totalCost: number, qty: number): number {
   if (!(qty > 0) || !Number.isFinite(qty)) {

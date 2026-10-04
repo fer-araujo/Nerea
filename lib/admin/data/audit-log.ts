@@ -13,7 +13,8 @@ export type AuditAction =
   | "casting.record"
   | "piece.update"
   | "sale.record"
-  | "sale.void";
+  | "sale.void"
+  | "sale.fee-refresh";
 
 export type AuditEntity =
   | "material"

@@ -27,6 +27,31 @@ export const LINK_CLASS =
 
 export const PANEL_CLASS = "border border-line bg-bone-raised p-5 sm:p-6";
 
+// The admin's tab rows (the section tabs in AdminNav, the period tabs in
+// PeriodNav). A row scrolls sideways on a phone instead of wrapping, so it
+// needs `overflow-x: auto`, and that is where the trap is: with `overflow-x`
+// set and `overflow-y` left at its default, the browser computes `overflow-y:
+// auto` as well, so ANY vertical overflow, even one pixel, grows a vertical
+// scrollbar (the tiny up/dot/down one on desktop Windows). So the row pins
+// `overflow-y: hidden` and hides its own scrollbar (it still scrolls by touch,
+// trackpad and keyboard focus). When the tabs fit nothing overflows at all.
+export const TAB_ROW_CLASS =
+  "flex gap-6 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
+
+// One tab. Its 2px underline sits INSIDE the link's own box (no negative margin
+// pulling it out of the row, which is what used to overflow), and its focus
+// ring is drawn inside the box too (`-outline-offset-2`): a scrolling row clips
+// whatever sticks out of it, so the global outset ring (globals.css) would be
+// cut off at the top and bottom. The trailing `!` is needed because that global
+// `:focus-visible` rule is unlayered CSS, which beats any Tailwind utility.
+export const TAB_LINK_CLASS =
+  "inline-flex min-h-11 shrink-0 items-center border-b-2 font-sans text-sm transition-colors focus-visible:-outline-offset-2!";
+
+export const TAB_LINK_ACTIVE_CLASS = "border-brass text-ink";
+
+export const TAB_LINK_IDLE_CLASS =
+  "border-transparent text-graphite hover:text-ink";
+
 export const NOTICE_ERROR_CLASS =
   "border border-ink/25 bg-bone-sunk px-4 py-3 font-mono text-xs leading-relaxed text-ink";
 

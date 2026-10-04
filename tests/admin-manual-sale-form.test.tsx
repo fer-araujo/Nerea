@@ -15,9 +15,11 @@ import {
 // warning) is in tests/admin-pieces-sales-actions.test.ts.
 const recordActionMock = vi.fn();
 const voidActionMock = vi.fn();
+const refreshActionMock = vi.fn();
 vi.mock("@/app/admin/(panel)/ventas/actions", () => ({
   recordManualSaleAction: (...args: unknown[]) => recordActionMock(...args),
   voidSaleAction: (...args: unknown[]) => voidActionMock(...args),
+  refreshSaleFeeAction: (...args: unknown[]) => refreshActionMock(...args),
 }));
 
 import { MAX_SALE_ITEMS } from "@/lib/admin/domain/sales";
@@ -25,6 +27,7 @@ import {
   ManualSaleForm,
   type SalePiece,
 } from "../app/admin/(panel)/ventas/ManualSaleForm";
+import { RefreshFeeForm } from "../app/admin/(panel)/ventas/RefreshFeeForm";
 import { VoidSaleForm } from "../app/admin/(panel)/ventas/VoidSaleForm";
 
 const TODAY = "2026-10-02";
@@ -227,6 +230,81 @@ describe("ManualSaleForm: submitting", () => {
     expect(formData.getAll("itemOption")).toEqual(["Talla 7", ""]);
   });
 
+  it("posts the terminal's commission when one is typed, as the field's own value", async () => {
+    recordActionMock.mockResolvedValue({ ok: true });
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    chooseRow(0, "anillo-luna");
+    fireEvent.change(screen.getByLabelText("Comisión (terminal, MXN, opcional)"), {
+      target: { value: "67.50" },
+    });
+
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(recordActionMock).toHaveBeenCalledTimes(1));
+    const [formData] = recordActionMock.mock.calls[0] as [FormData];
+    expect(formData.get("terminalFee")).toBe("67.50");
+  });
+
+  it("posts an empty commission when none is typed: the server reads that as none (cash)", async () => {
+    recordActionMock.mockResolvedValue({ ok: true });
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    chooseRow(0, "anillo-luna");
+
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(recordActionMock).toHaveBeenCalledTimes(1));
+    const [formData] = recordActionMock.mock.calls[0] as [FormData];
+    expect(formData.get("terminalFee")).toBe("");
+  });
+
+  it("offers the terminal's commission as an optional, non-negative amount in pesos, with a plain-words hint", () => {
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+
+    const field = screen.getByLabelText("Comisión (terminal, MXN, opcional)");
+    expect(field).not.toBeRequired();
+    expect(field).toHaveAttribute("type", "number");
+    expect(field).toHaveAttribute("min", "0");
+    expect(field).toHaveAttribute("step", "0.01");
+    expect(field).toHaveValue(null);
+    expect(field).toHaveAccessibleDescription(/Lo que cobró la terminal por esta venta/);
+    expect(field).toHaveAccessibleDescription(/Déjalo vacío si cobraste en efectivo/);
+  });
+
+  it("does not change the live total: the commission is a cost of the sale, not part of what was paid", () => {
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    chooseRow(0, "anillo-luna");
+
+    fireEvent.change(screen.getByLabelText("Comisión (terminal, MXN, opcional)"), {
+      target: { value: "67.50" },
+    });
+
+    expect(total()).toHaveTextContent("$1,850.00");
+  });
+
+  it("clears the commission with the rest of the form after a recorded sale, and keeps it on failure", async () => {
+    recordActionMock.mockResolvedValueOnce({
+      ok: false,
+      error: "invalid-sale",
+      message: "La venta no es válida. Revisa las piezas y los montos.",
+    });
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    chooseRow(0, "anillo-luna");
+    fireEvent.change(screen.getByLabelText("Comisión (terminal, MXN, opcional)"), {
+      target: { value: "67.50" },
+    });
+
+    fireEvent.click(submitButton());
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByLabelText("Comisión (terminal, MXN, opcional)")).toHaveValue(67.5);
+
+    recordActionMock.mockResolvedValue({ ok: true });
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+    fireEvent.click(submitButton());
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Venta registrada.");
+    expect(screen.getByLabelText("Comisión (terminal, MXN, opcional)")).toHaveValue(null);
+  });
+
   it("posts no markSold at all when the store checkbox is unticked", async () => {
     recordActionMock.mockResolvedValue({ ok: true });
     render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
@@ -411,6 +489,68 @@ describe("VoidSaleForm", () => {
       screen.getByRole("button", { name: "Anulando…" }).closest("form") as HTMLFormElement,
     );
     expect(voidActionMock).toHaveBeenCalledTimes(1);
+
+    finish({ ok: true });
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+  });
+});
+
+describe("RefreshFeeForm", () => {
+  it("posts only the sale id when 'Actualizar comisión' is pressed, and confirms on success", async () => {
+    refreshActionMock.mockResolvedValue({ ok: true });
+    render(<RefreshFeeForm saleId="stripe_cs_live_1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar comisión" }));
+
+    await waitFor(() => expect(refreshActionMock).toHaveBeenCalledTimes(1));
+    const [formData] = refreshActionMock.mock.calls[0] as [FormData];
+    expect([...formData.keys()]).toEqual(["saleId"]);
+    expect(formData.get("saleId")).toBe("stripe_cs_live_1");
+    expect(await screen.findByRole("status")).toHaveTextContent("Comisión actualizada.");
+  });
+
+  it("shows the server's message when Stripe has no fee yet, and lets the admin try again", async () => {
+    refreshActionMock.mockResolvedValue({
+      ok: false,
+      error: "fee-unavailable",
+      message: "Stripe todavía no entrega la comisión de esta venta. Inténtalo de nuevo en unos minutos.",
+    });
+    render(<RefreshFeeForm saleId="stripe_cs_live_1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar comisión" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Inténtalo de nuevo");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Actualizar comisión" })).toBeEnabled(),
+    );
+  });
+
+  it("shows a generic message when the request itself fails, without leaking its error", async () => {
+    refreshActionMock.mockRejectedValue(new Error("network down"));
+    render(<RefreshFeeForm saleId="stripe_cs_live_1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar comisión" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo guardar");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("network down");
+  });
+
+  it("disables the button while Stripe is being asked, so it cannot be sent twice", async () => {
+    let finish: (value: { ok: true }) => void = () => undefined;
+    refreshActionMock.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<RefreshFeeForm saleId="stripe_cs_live_1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar comisión" }));
+
+    expect(await screen.findByRole("button", { name: "Consultando a Stripe…" })).toBeDisabled();
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Consultando a Stripe…" }).closest("form") as HTMLFormElement,
+    );
+    expect(refreshActionMock).toHaveBeenCalledTimes(1);
 
     finish({ ok: true });
     expect(await screen.findByRole("status")).toBeInTheDocument();

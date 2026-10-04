@@ -1,8 +1,10 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { routing } from "@/i18n/routing";
 import { Link } from "@/i18n/navigation";
+import { ClearCartOnSuccess } from "@/components/checkout/ClearCartOnSuccess";
 import { WhatsAppLink } from "@/components/ui/WhatsAppLink";
 import { getSiteSettings } from "@/lib/site-settings/adapter";
 import { pageTitle } from "@/lib/seo";
@@ -70,6 +72,12 @@ export default async function CheckoutSuccessPage({
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-start justify-center gap-4 px-6 py-24">
+      {/* Empties the cart when Stripe's `?session_id=` is present. It reads the
+          query string on the client, so the Suspense boundary is what lets
+          this page stay statically rendered. Renders nothing. */}
+      <Suspense fallback={null}>
+        <ClearCartOnSuccess />
+      </Suspense>
       <p className="font-mono text-xs uppercase tracking-[0.14em] text-graphite">
         {t("successKicker")}
       </p>

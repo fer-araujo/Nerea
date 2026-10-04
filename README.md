@@ -110,9 +110,15 @@ Two more pages behind the same session check:
   totals: **Ventas** (the pieces' prices, shipping apart), **Costo de lo
   vendido** and **Utilidad bruta**. Online-shop sales appear on their own; **Registrar
   venta** adds one made outside the shop (price starts at the catalog's and can be
-  lowered), optionally marking the piece sold in the store. **Anular venta** voids a
-  manual sale: it stays on the list, muted, and leaves every total (nothing is
-  deleted, and it does not put the piece back on sale — do that in Studio).
+  lowered), optionally marking the piece sold in the store, and optionally
+  recording the terminal's commission (**Comisión (terminal)**). **Anular venta**
+  voids a manual sale, or an online sale made in Stripe **test mode**: it stays on
+  the list, muted, and leaves every total (nothing is deleted, and it does not put
+  the piece back on sale — do that in Studio). A live online sale cannot be voided:
+  refund it in Stripe.
+  Every sale shows its **Comisión** and, for online sales, the **Neto** Stripe
+  deposits; a sale whose fee Stripe could not give yet shows **Comisión
+  pendiente** with an **Actualizar comisión** button.
 
 Collections: `pieces/{handle}` (cost by catalog slug; no document = cost pending)
 and `sales/{id}`. A sale freezes the cost of its pieces when it is recorded, so a
@@ -139,8 +145,27 @@ sale or leaving a paid piece on sale: a piece that could not be marked sold (no
 `SANITY_WRITE_TOKEN`, Sanity down), a sale that could not be written, or Firestore
 not being configured at all (one fixed log line). A product that no longer exists
 in Sanity is not a failure. Marking sold is idempotent and the sale is create-only,
-so a retry is safe. Signature verification is unchanged and still runs first. An
+so a retry is safe. Signature verification is unchanged and still runs first. A live
 online sale cannot be voided from the panel (refund it in Stripe).
+
+**Stripe fees.** Before it records the sale, the webhook asks Stripe for the
+payment's balance transaction and stores `stripeFee` (Stripe's fee **with the IVA on
+it**, as Stripe reports them together) and `stripeNet` (what Stripe deposits), in
+integer centavos. If Stripe can't give them yet (the balance transaction can lag the
+payment, or the call fails) the sale is **still recorded**, with `feePending: true`,
+and the webhook still answers `200`: use **Actualizar comisión** on that sale in
+Ventas later. The Resumen shows **Comisiones Stripe** and **Utilidad después de
+comisiones** (ventas − comisiones − costo de lo vendido); taxes on the sale itself
+(IVA, ISR) are not included, they depend on your tax regime.
+
+**Test mode.** Each online sale stores `livemode` from the verified session, and a
+sale made with Stripe's test keys (`livemode: false`) is shown with a **Prueba**
+badge, muted, and left out of the Ventas and Resumen totals (a sale stored before
+the field existed is judged by its session id: `cs_test_…` is test, `cs_live_…` is
+live). Local testing uses the same Firestore as production, so a test purchase
+becomes a sale there: void it with **Anular venta**. Local test purchases also mark
+the piece sold in the shared Sanity dataset; revert it in Studio (Estado →
+Disponible).
 
 ### Resumen and Respaldo
 
@@ -148,7 +173,8 @@ The panel's home page, behind the same session check:
 
 - **Resumen** — the KPIs of a period (this month / last month / this year, Mexico
   time): **Ventas**, **Costo de lo vendido**, **Utilidad bruta** (with its margin;
-  red when negative), **Inversiones**, **Flujo** (ventas − inversiones), the value
+  red when negative), **Comisiones Stripe**, **Utilidad después de comisiones**,
+  **Inversiones**, **Flujo** (ventas − inversiones), the value
   of the inventory, pieces available / sold, unread messages and the sales still
   waiting for a cost — plus a chart of the last 12 months (empty months included)
   with a "Ver como tabla" view of the same numbers. One read of the sales and

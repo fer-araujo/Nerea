@@ -246,6 +246,7 @@ export default async function AdminSummaryPage({
 
   const label = periodRangeLabel(period, range);
   const loss = kpis !== null && kpis.grossProfit < 0;
+  const lossAfterFees = kpis !== null && kpis.profitAfterFees < 0;
 
   return (
     <section>
@@ -320,6 +321,41 @@ export default async function AdminSummaryPage({
           </KpiCard>
 
           <KpiCard
+            label="Comisiones Stripe"
+            value={money(kpis?.fees ?? null)}
+          >
+            <Hint>
+              Lo que cobran Stripe (y la terminal) por cobrar, con el IVA de la
+              comisión
+            </Hint>
+            {kpis && kpis.pendingFeeCount > 0 ? (
+              <>
+                <Hint>
+                  {kpis.pendingFeeCount}{" "}
+                  {kpis.pendingFeeCount === 1
+                    ? "venta con comisión pendiente"
+                    : "ventas con comisión pendiente"}
+                  : la utilidad después de comisiones es mayor que la real.
+                </Hint>
+                <Link href="/admin/ventas" className={cn(LINK_CLASS, "mt-1")}>
+                  Actualizar comisiones
+                </Link>
+              </>
+            ) : null}
+          </KpiCard>
+
+          <KpiCard
+            label="Utilidad después de comisiones"
+            value={money(kpis?.profitAfterFees ?? null)}
+            negative={lossAfterFees}
+          >
+            <Hint>
+              Ventas menos comisiones menos costo de lo vendido
+              {lossAfterFees ? " · En pérdida" : ""}
+            </Hint>
+          </KpiCard>
+
+          <KpiCard
             label="Inversiones"
             value={money(kpis?.investments ?? null)}
           >
@@ -371,6 +407,15 @@ export default async function AdminSummaryPage({
           menos lo que invertiste en materiales en el mismo periodo, aunque ese
           material siga en tu inventario. Las ventas son el precio de las
           piezas, sin el envío.
+        </p>
+        <p className="mt-3 max-w-prose text-sm leading-relaxed text-graphite">
+          La comisión es lo que cobra Stripe por cada pago más el IVA de esa
+          comisión (Stripe ya la descuenta de lo que te deposita); en una venta
+          manual es la que cobró tu terminal. La utilidad después de comisiones
+          es la utilidad bruta menos esas comisiones. No incluye los impuestos
+          de tus ventas (IVA, ISR): esos dependen de tu régimen fiscal. Las
+          compras de prueba hechas con las llaves de prueba de Stripe no cuentan
+          en ninguna cifra.
         </p>
       </section>
 

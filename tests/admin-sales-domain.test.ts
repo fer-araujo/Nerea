@@ -5,7 +5,9 @@ import {
   SALE_STATUSES,
   SalesError,
   costSnapshot,
+  isVoidableSale,
   itemsSubtotal,
+  resolveLivemode,
   summarizeSales,
   type SaleFigures,
 } from "@/lib/admin/domain/sales";
@@ -18,6 +20,9 @@ function sale(overrides: Partial<SaleFigures> = {}): SaleFigures {
     total: 100_000,
     costOfGoods: 40_000,
     costPending: false,
+    livemode: true,
+    fee: 0,
+    feePending: false,
     ...overrides,
   };
 }
@@ -80,12 +85,15 @@ describe("summarizeSales (period totals)", () => {
     expect(totals).toEqual({
       count: 2,
       voidedCount: 0,
+      testCount: 0,
       subtotal: 275_000,
       shipping: 15_000,
       total: 290_000,
       costOfGoods: 90_000,
       grossProfit: 185_000,
       pendingCount: 0,
+      fees: 0,
+      pendingFeeCount: 0,
     });
   });
 
@@ -105,13 +113,87 @@ describe("summarizeSales (period totals)", () => {
     expect(totals).toEqual({
       count: 1,
       voidedCount: 1,
+      testCount: 0,
       subtotal: 100_000,
       shipping: 0,
       total: 100_000,
       costOfGoods: 40_000,
       grossProfit: 60_000,
       pendingCount: 0,
+      fees: 0,
+      pendingFeeCount: 0,
     });
+  });
+
+  it("leaves a test-mode sale out of EVERY figure and only counts it as a test", () => {
+    const totals = summarizeSales([
+      sale({ subtotal: 100_000, total: 100_000, costOfGoods: 40_000, fee: 3_000 }),
+      sale({
+        livemode: false,
+        subtotal: 999_999,
+        shipping: 50_000,
+        total: 1_049_999,
+        costOfGoods: 500_000,
+        costPending: true,
+        fee: 77_000,
+        feePending: true,
+      }),
+    ]);
+
+    expect(totals).toEqual({
+      count: 1,
+      voidedCount: 0,
+      testCount: 1,
+      subtotal: 100_000,
+      shipping: 0,
+      total: 100_000,
+      costOfGoods: 40_000,
+      grossProfit: 60_000,
+      // Neither the test sale's pending cost nor its pending fee is counted.
+      pendingCount: 0,
+      fees: 3_000,
+      pendingFeeCount: 0,
+    });
+  });
+
+  it("counts a voided test sale as voided, once, never as a test as well", () => {
+    const totals = summarizeSales([sale({ livemode: false, status: "void" })]);
+
+    expect(totals.voidedCount).toBe(1);
+    expect(totals.testCount).toBe(0);
+    expect(totals.count).toBe(0);
+  });
+
+  it("adds up the commissions of the counted sales, apart from the sales figure", () => {
+    const totals = summarizeSales([
+      sale({ subtotal: 185_000, total: 200_000, shipping: 15_000, fee: 7_540 }),
+      // A manual sale's commission is the terminal's.
+      sale({ subtotal: 90_000, total: 90_000, fee: 2_900 }),
+      sale({ fee: 0 }),
+    ]);
+
+    expect(totals.fees).toBe(10_440);
+    expect(totals.subtotal).toBe(375_000);
+    expect(totals.grossProfit).toBe(375_000 - 120_000);
+  });
+
+  it("counts the Stripe sales whose fee is still pending, adding nothing for them", () => {
+    const totals = summarizeSales([
+      sale({ fee: 0, feePending: true }),
+      sale({ fee: 0, feePending: true }),
+      sale({ fee: 4_000 }),
+    ]);
+
+    expect(totals.pendingFeeCount).toBe(2);
+    expect(totals.fees).toBe(4_000);
+    expect(totals.count).toBe(3);
+  });
+
+  it("does not count the commission of a voided sale", () => {
+    const totals = summarizeSales([sale({ status: "void", fee: 9_000, feePending: true })]);
+
+    expect(totals.fees).toBe(0);
+    expect(totals.pendingFeeCount).toBe(0);
   });
 
   it("keeps shipping out of the sales figure and the gross profit", () => {
@@ -147,12 +229,15 @@ describe("summarizeSales (period totals)", () => {
     expect(summarizeSales([])).toEqual({
       count: 0,
       voidedCount: 0,
+      testCount: 0,
       subtotal: 0,
       shipping: 0,
       total: 0,
       costOfGoods: 0,
       grossProfit: 0,
       pendingCount: 0,
+      fees: 0,
+      pendingFeeCount: 0,
     });
   });
 
@@ -161,6 +246,56 @@ describe("summarizeSales (period totals)", () => {
 
     expect(totals.count).toBe(2);
   });
+});
+
+describe("resolveLivemode", () => {
+  it("trusts a stored boolean, whatever the session id says", () => {
+    expect(resolveLivemode(false, "cs_live_abc")).toBe(false);
+    expect(resolveLivemode(true, "cs_test_abc")).toBe(true);
+    expect(resolveLivemode(false, undefined)).toBe(false);
+  });
+
+  it("judges a document without the field by its Checkout Session id", () => {
+    expect(resolveLivemode(undefined, "cs_test_a1B2c3")).toBe(false);
+    expect(resolveLivemode(undefined, "cs_live_a1B2c3")).toBe(true);
+  });
+
+  it.each([
+    ["no session id (a manual sale)", undefined, undefined],
+    ["an unreadable session id", undefined, "x"],
+    ["a session id of no known mode", undefined, "cs_other_1"],
+    ["a non-string session id", undefined, 42],
+    ["a stored value that is not a boolean, and no session id", "false", undefined],
+  ])("counts as live with %s: a real sale until proven otherwise", (_label, stored, id) => {
+    expect(resolveLivemode(stored, id)).toBe(true);
+  });
+
+  it("ignores a stored value that is not a boolean, and lets the session id decide", () => {
+    expect(resolveLivemode(0, "cs_test_1")).toBe(false);
+    expect(resolveLivemode("true", "cs_test_1")).toBe(false);
+  });
+});
+
+describe("isVoidableSale", () => {
+  it("allows a manual sale", () => {
+    expect(isVoidableSale("manual", true)).toBe(true);
+  });
+
+  it("allows a Stripe sale made in test mode: there is no real payment to refund", () => {
+    expect(isVoidableSale("stripe", false)).toBe(true);
+  });
+
+  it("refuses a LIVE Stripe sale: it is refunded in Stripe, not voided here", () => {
+    expect(isVoidableSale("stripe", true)).toBe(false);
+  });
+
+  it.each(["carrier-pigeon", "", undefined, null, 1])(
+    "refuses a sale whose source is unreadable (%j), test or not",
+    (source) => {
+      expect(isVoidableSale(source, true)).toBe(false);
+      expect(isVoidableSale(source, false)).toBe(false);
+    },
+  );
 });
 
 describe("sales vocabulary", () => {

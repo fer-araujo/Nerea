@@ -66,10 +66,12 @@ export function ManualSaleForm({
   const { result, pending, submit } = useAdminAction(recordManualSaleAction);
   const markSoldHintId = useId();
   const noteHintId = useId();
+  const terminalFeeHintId = useId();
   const nextKey = useRef(1);
   const [rows, setRows] = useState<Row[]>(() => [emptyRow(0)]);
   const [date, setDate] = useState(today);
   const [shipping, setShipping] = useState("");
+  const [terminalFee, setTerminalFee] = useState("");
   const [note, setNote] = useState("");
   const [markSold, setMarkSold] = useState(true);
 
@@ -115,6 +117,7 @@ export function ManualSaleForm({
       setRows([emptyRow(0)]);
       setDate(today);
       setShipping("");
+      setTerminalFee("");
       setNote("");
       setMarkSold(true);
     });
@@ -155,6 +158,28 @@ export function ManualSaleForm({
             className={INPUT_CLASS}
           />
         </label>
+
+        <div className={FIELD_CLASS}>
+          <label className={FIELD_CLASS}>
+            <span className={LABEL_CLASS}>Comisión (terminal, MXN, opcional)</span>
+            <input
+              type="number"
+              name="terminalFee"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              aria-describedby={terminalFeeHintId}
+              value={terminalFee}
+              onChange={(event) => setTerminalFee(event.target.value)}
+              disabled={pending}
+              className={INPUT_CLASS}
+            />
+          </label>
+          <p id={terminalFeeHintId} className="text-sm leading-relaxed text-graphite">
+            Lo que cobró la terminal por esta venta, con el IVA de la comisión.
+            Déjalo vacío si cobraste en efectivo.
+          </p>
+        </div>
       </div>
 
       <ul className="flex flex-col gap-4">

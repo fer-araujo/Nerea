@@ -297,6 +297,15 @@ export const recordManualSaleSchema = z
           : value,
       moneyText("Envío", { max: 100_000 }),
     ),
+    // The terminal's commission, optional like the shipping: blank, or not sent
+    // at all, means none (cash, or a sale without a terminal).
+    terminalFee: z.preprocess(
+      (value) =>
+        value === undefined || (typeof value === "string" && value.trim() === "")
+          ? "0"
+          : value,
+      moneyText("Comisión", { max: 100_000 }),
+    ),
     note: optionalText("Nota", 300),
     markSold: z.boolean(),
     items: z
@@ -316,5 +325,11 @@ export const recordManualSaleSchema = z
   );
 
 export const voidSaleSchema = z.object({
+  saleId: documentId("Venta"),
+});
+
+// "Actualizar comisión" names a sale and nothing else: the session id it asks
+// Stripe about is read from the stored sale, never from the request.
+export const refreshSaleFeeSchema = z.object({
   saleId: documentId("Venta"),
 });

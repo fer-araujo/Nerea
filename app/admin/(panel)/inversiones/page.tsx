@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Pager } from "@/components/admin/Pager";
+import { PeriodNav } from "@/components/admin/PeriodNav";
 import {
   LABEL_CLASS,
   LINK_CLASS,
@@ -39,12 +40,6 @@ export const metadata: Metadata = {
 };
 
 const INVESTMENTS_PATH = "/admin/inversiones";
-
-const PERIOD_LINKS: ReadonlyArray<{ key: PeriodKey; label: string }> = [
-  { key: "this-month", label: "Este mes" },
-  { key: "last-month", label: "Mes anterior" },
-  { key: "this-year", label: "Este año" },
-];
 
 // Shown in the atelier's own time no matter where the server runs.
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-MX", {
@@ -213,26 +208,11 @@ export default async function AdminInvestmentsPage({
         existencias y recalcula el costo promedio de cada material.
       </p>
 
-      <nav
-        aria-label="Periodo"
-        className="mt-10 flex gap-6 overflow-x-auto border-b border-line"
-      >
-        {PERIOD_LINKS.map((item) => (
-          <Link
-            key={item.key}
-            href={listHref(item.key, 1)}
-            aria-current={item.key === period ? "page" : undefined}
-            className={cn(
-              "-mb-px inline-flex min-h-11 shrink-0 items-center border-b-2 font-sans text-sm transition-colors",
-              item.key === period
-                ? "border-brass text-ink"
-                : "border-transparent text-graphite hover:text-ink",
-            )}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
+      <PeriodNav
+        current={period}
+        hrefFor={(key) => listHref(key, 1)}
+        className="mt-10"
+      />
 
       <div className={cn(PANEL_CLASS, "mt-8")}>
         <p className={LABEL_CLASS}>Total invertido · {label}</p>

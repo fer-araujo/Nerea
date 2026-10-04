@@ -66,4 +66,27 @@ describe("AdminNav", () => {
       "overflow-x-auto",
     );
   });
+
+  it("never grows a vertical scrollbar: overflow-y is pinned hidden and the scrollbar itself is hidden", () => {
+    render(<AdminNav />);
+
+    // `overflow-x: auto` alone makes `overflow-y` compute to `auto`, so a single
+    // pixel of vertical overflow would show the tiny up/down scrollbar.
+    expect(screen.getByRole("navigation", { name: "Secciones del panel" })).toHaveClass(
+      "overflow-x-auto",
+      "overflow-y-hidden",
+      "[scrollbar-width:none]",
+      "[&::-webkit-scrollbar]:hidden",
+    );
+  });
+
+  it("keeps each tab's underline and focus ring inside its own box, so nothing sticks out of the row", () => {
+    render(<AdminNav />);
+
+    for (const link of screen.getAllByRole("link")) {
+      expect(link).toHaveClass("border-b-2", "focus-visible:-outline-offset-2!");
+      // A negative margin is what pulled the underline out of the row.
+      expect(link).not.toHaveClass("-mb-px");
+    }
+  });
 });

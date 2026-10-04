@@ -51,7 +51,12 @@ const DEFAULT_MESSAGES: Readonly<Record<ActionErrorCode, string>> = {
   "piece-unavailable":
     "Una de las piezas ya está vendida. Recarga la página para ver las que siguen disponibles.",
   "sale-not-found": "La venta ya no existe. Recarga la página.",
-  "sale-not-voidable": "Solo se pueden anular las ventas manuales.",
+  "sale-not-voidable":
+    "Solo se pueden anular las ventas manuales y las de prueba.",
+  "fee-not-refreshable":
+    "Solo las ventas de la tienda en línea tienen una comisión de Stripe que actualizar.",
+  "fee-unavailable":
+    "Stripe todavía no entrega la comisión de esta venta. Inténtalo de nuevo en unos minutos.",
   "invalid-sale": "La venta no es válida. Revisa las piezas y los montos.",
   unavailable:
     "El servicio no está disponible por ahora. Inténtalo de nuevo en unos minutos.",

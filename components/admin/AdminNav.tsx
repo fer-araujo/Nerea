@@ -3,6 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
+import {
+  TAB_LINK_ACTIVE_CLASS,
+  TAB_LINK_CLASS,
+  TAB_LINK_IDLE_CLASS,
+  TAB_ROW_CLASS,
+} from "./styles";
 
 // Only pages that exist are linked — new modules add their entry here when
 // their route ships, never before. `exact` keeps "Resumen" (/admin) from
@@ -20,14 +26,16 @@ const NAV_ITEMS = [
 // Route-based tabs: the active state comes from the URL, so it survives a
 // reload and deep links. A client island only because it reads the pathname;
 // the strip scrolls horizontally instead of wrapping so it stays one tidy
-// line down to 360px as modules are added.
+// line down to 360px as modules are added (see TAB_ROW_CLASS for how that
+// stays free of a vertical scrollbar). `-mb-px` sits the row on the header's
+// bottom border, so the active underline replaces the hairline.
 export function AdminNav() {
   const pathname = usePathname();
 
   return (
     <nav
       aria-label="Secciones del panel"
-      className="-mb-px flex gap-6 overflow-x-auto"
+      className={cn("-mb-px", TAB_ROW_CLASS)}
     >
       {NAV_ITEMS.map((item) => {
         const active = item.exact
@@ -40,10 +48,8 @@ export function AdminNav() {
             href={item.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex min-h-11 shrink-0 items-center border-b-2 font-sans text-sm transition-colors",
-              active
-                ? "border-brass text-ink"
-                : "border-transparent text-graphite hover:text-ink",
+              TAB_LINK_CLASS,
+              active ? TAB_LINK_ACTIVE_CLASS : TAB_LINK_IDLE_CLASS,
             )}
           >
             {item.label}

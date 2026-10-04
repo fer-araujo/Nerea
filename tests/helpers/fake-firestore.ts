@@ -146,6 +146,11 @@ export class FakeDocRef {
   collection(name: string): FakeCollectionRef {
     return new FakeCollectionRef(this.db, `${this.path}/${name}`);
   }
+
+  /** A plain (non-transactional) read, like `DocumentReference.get()`. */
+  async get(): Promise<FakeSnapshot> {
+    return this.db.snapshot(this);
+  }
 }
 
 export class FakeSnapshot {

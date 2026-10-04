@@ -10,9 +10,10 @@ import {
   SALE_STATUSES,
   SalesError,
   costSnapshot,
+  isVoidableSale,
   itemsSubtotal,
+  resolveLivemode,
   summarizeSales,
-  type SaleFigures,
   type SaleItem,
   type SaleSource,
   type SaleStatus,
@@ -23,26 +24,31 @@ import { appendAuditEntry } from "./audit-log";
 import { getCatalogProducts } from "./catalog";
 import { readPieceCostTotals } from "./pieces";
 import { buildSaleDocument } from "./sale-document";
+import { SALE_FIGURE_FIELDS, readSaleFigures } from "./sale-figures";
 import {
   COLLECTIONS,
   isDocumentId,
   isPieceHandle,
   readCentavos,
   readEnum,
+  readOptionalCentavos,
   readOptionalString,
   readString,
   toDate,
 } from "./shared";
+import { fetchStripeFees } from "./stripe-fees";
 
 // Sales: `sales/{id}` is one sale, manual (recorded here) or from Stripe
 // (recorded by the webhook, see stripe-sales.ts). A sale is never deleted: a
-// manual one is VOIDED, which keeps it on record and leaves it out of totals.
-// A sale holds NO customer data (see sale-document.ts).
+// manual one, or a Stripe one made in TEST mode, is VOIDED, which keeps it on
+// record and leaves it out of totals. A sale holds NO customer data (see
+// sale-document.ts).
 //
 // Queries: the period filter is a range on `date` ordered by `date` — one
 // field, served by the automatic single-field index. Filtering by status as
 // well would need a composite index, so a voided sale is dropped in memory
-// instead (see sumSales). No composite index is needed anywhere in this file.
+// instead (see sumSales); the same goes for a test-mode sale. No composite
+// index is needed anywhere in this file.
 
 export const SALES_PAGE_SIZE = 20;
 /** Cap on documents read to total a period (a year is a few hundred). */
@@ -62,6 +68,12 @@ export interface RecordManualSaleInput {
   items: ManualSaleItemInput[];
   /** Shipping charged, integer centavos (0 for none). */
   shipping: number;
+  /**
+   * The terminal's commission on this sale, IVA included, integer centavos.
+   * Absent or 0 for none (cash). It is a cost of the sale, so it can never be
+   * more than what the customer paid.
+   */
+  terminalFee?: number;
   note?: string;
 }
 
@@ -103,6 +115,14 @@ export async function recordManualSale(
   }
   if (!isCentavos(input.shipping)) {
     throw new InventoryError("invalid-cost");
+  }
+  const terminalFee = input.terminalFee ?? 0;
+  if (!isCentavos(terminalFee)) {
+    throw new InventoryError("invalid-cost");
+  }
+  // A commission larger than what the customer paid is a typo, never a sale.
+  if (terminalFee > itemsSubtotal(input.items) + input.shipping) {
+    throw new SalesError("invalid-sale");
   }
 
   // Checked before the network call: with Firebase down there is nothing to do.
@@ -148,6 +168,7 @@ export async function recordManualSale(
         total: subtotal + input.shipping,
         costOfGoods,
         costPending,
+        terminalFee,
         ...(input.note ? { note: input.note } : {}),
         actor,
       }),
@@ -164,11 +185,14 @@ export async function recordManualSale(
 }
 
 /**
- * Voids a MANUAL sale: it stays on record with `status: "void"` and drops out
- * of every total. A Stripe sale can't be voided (the payment happened and is
- * refunded in Stripe, not here). Voiding an already voided sale is a no-op that
- * succeeds (`voided: false`), so a double click can't fail or audit twice.
- * Returns `null` when Firebase isn't configured.
+ * Voids a MANUAL sale, or a Stripe sale made in TEST mode (not a real payment,
+ * so there is nothing to refund): it stays on record with `status: "void"` and
+ * drops out of every total. A LIVE Stripe sale can't be voided (the payment
+ * happened and is refunded in Stripe, not here). Whether a Stripe sale is test
+ * or live is read like everywhere else (`resolveLivemode`): the stored
+ * `livemode`, or for an older document its session id. Voiding an already
+ * voided sale is a no-op that succeeds (`voided: false`), so a double click
+ * can't fail or audit twice. Returns `null` when Firebase isn't configured.
  */
 export async function voidSale(
   id: string,
@@ -191,9 +215,10 @@ export async function voidSale(
     }
 
     const data = snapshot.data() ?? {};
-    // Strict on purpose: a document whose source is unreadable is NOT
-    // assumed manual.
-    if (data.source !== "manual") {
+    // Strict on purpose: a document whose source is unreadable is NOT assumed
+    // manual (or test), and a live Stripe payment is never voidable here.
+    const livemode = resolveLivemode(data.livemode, data.stripeSessionId);
+    if (!isVoidableSale(data.source, livemode)) {
       throw new SalesError("sale-not-voidable");
     }
     if (data.status === "void") {
@@ -212,6 +237,79 @@ export async function voidSale(
   });
 }
 
+/**
+ * "Actualizar comisión": reads Stripe's fee and net for a Stripe sale whose fee
+ * could not be read when the webhook recorded it (`feePending`), and stores
+ * them on the sale. Nothing else on the sale changes.
+ *
+ * Stripe is asked OUTSIDE the transaction (a network call has no place inside
+ * one, which may be retried), and the sale is read again inside it, so two
+ * clicks, or a click racing another, store the fee once and audit once. A sale
+ * whose fee is already known succeeds as a no-op (`refreshed: false`).
+ *
+ * Rejects with a SalesError: "sale-not-found"; "fee-not-refreshable" for a sale
+ * that has no Stripe fee to read (a manual one, or one with no session id);
+ * "fee-unavailable" when Stripe can't give the fee yet (not settled, not
+ * reachable, unknown to this account's keys). Returns `null` when Firebase
+ * isn't configured.
+ */
+export async function refreshSaleFee(
+  id: string,
+  actor: string,
+): Promise<{ refreshed: boolean } | null> {
+  if (!isDocumentId(id)) {
+    throw new SalesError("sale-not-found");
+  }
+
+  const db = getAdminDb();
+  if (!db) {
+    return null;
+  }
+
+  const ref = db.collection(COLLECTIONS.sales).doc(id);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) {
+    throw new SalesError("sale-not-found");
+  }
+  const current = snapshot.data() ?? {};
+  const sessionId = readString(current.stripeSessionId);
+  if (current.source !== "stripe" || sessionId === "") {
+    throw new SalesError("fee-not-refreshable");
+  }
+  if (readOptionalCentavos(current.stripeFee) !== null) {
+    return { refreshed: false };
+  }
+
+  const fees = await fetchStripeFees(sessionId);
+  if (!fees) {
+    throw new SalesError("fee-unavailable");
+  }
+
+  return db.runTransaction(async (tx) => {
+    const latest = await tx.get(ref);
+    if (!latest.exists) {
+      throw new SalesError("sale-not-found");
+    }
+    if (readOptionalCentavos(latest.data()?.stripeFee) !== null) {
+      return { refreshed: false };
+    }
+
+    tx.update(ref, {
+      stripeFee: fees.fee,
+      stripeNet: fees.net,
+      feePending: false,
+    });
+    appendAuditEntry(db, tx, {
+      actor,
+      action: "sale.fee-refresh",
+      entity: "sale",
+      entityId: id,
+    });
+
+    return { refreshed: true };
+  });
+}
+
 export interface Sale {
   id: string;
   source: SaleSource;
@@ -223,6 +321,22 @@ export interface Sale {
   total: number;
   costOfGoods: number;
   costPending: boolean;
+  /**
+   * `false` = made with Stripe's TEST keys: shown (badged, muted) but left out
+   * of every total. A document from before the field existed is judged by its
+   * session id (see `resolveLivemode`).
+   */
+  livemode: boolean;
+  /**
+   * The payment processor's commission on this sale, integer centavos: Stripe's
+   * fee with the IVA on it, or the terminal's on a manual sale. 0 for none, and
+   * while a Stripe fee is still pending.
+   */
+  fee: number;
+  /** A Stripe sale whose fee has not been read from Stripe yet. */
+  feePending: boolean;
+  /** What Stripe deposits for the sale (charged minus fee), once known. */
+  net: number | null;
   note: string | null;
 }
 
@@ -255,10 +369,14 @@ function toSaleItem(raw: unknown): SaleItem | null {
 function toSale(doc: DocumentSnapshot): Sale {
   const data = doc.data() ?? {};
   const rawItems: unknown[] = Array.isArray(data.items) ? data.items : [];
+  const source = readEnum(data.source, SALE_SOURCES, "manual");
+  // What the totals read, from the same reader, so the list and the totals can
+  // never disagree about a sale.
+  const figures = readSaleFigures(data);
 
   return {
     id: doc.id,
-    source: readEnum(data.source, SALE_SOURCES, "manual"),
+    source,
     status: readEnum(data.status, SALE_STATUSES, "active"),
     date: toDate(data.date),
     items: rawItems.flatMap((raw) => {
@@ -270,19 +388,11 @@ function toSale(doc: DocumentSnapshot): Sale {
     total: readCentavos(data.total),
     costOfGoods: readCentavos(data.costOfGoods),
     costPending: data.costPending === true,
+    livemode: figures.livemode,
+    fee: figures.fee,
+    feePending: figures.feePending,
+    net: source === "stripe" ? readOptionalCentavos(data.stripeNet) : null,
     note: readOptionalString(data.note),
-  };
-}
-
-function toFigures(doc: DocumentSnapshot): SaleFigures {
-  const data = doc.data() ?? {};
-  return {
-    status: readEnum(data.status, SALE_STATUSES, "active"),
-    subtotal: readCentavos(data.subtotal),
-    shipping: readCentavos(data.shipping),
-    total: readCentavos(data.total),
-    costOfGoods: readCentavos(data.costOfGoods),
-    costPending: data.costPending === true,
   };
 }
 
@@ -318,10 +428,11 @@ export async function listSales(
 
 /**
  * The totals of `range` over ALL of its sales (not just the visible page),
- * computed here on the server: sales, cost of goods sold and gross profit,
- * with voided sales left out. Reads only the fields the totals need, and
- * drops the voided ones in memory — see the note at the top of this file.
- * Returns `null` when Firebase isn't configured.
+ * computed here on the server: sales, cost of goods sold, gross profit and
+ * commissions, with voided and Stripe test-mode sales left out. Reads only the
+ * fields the totals need (SALE_FIGURE_FIELDS), and drops those sales in memory
+ * — see the note at the top of this file. Returns `null` when Firebase isn't
+ * configured.
  */
 export async function sumSales(
   range: PeriodRange,
@@ -335,20 +446,13 @@ export async function sumSales(
     .collection(COLLECTIONS.sales)
     .where("date", ">=", Timestamp.fromDate(range.start))
     .where("date", "<", Timestamp.fromDate(range.end))
-    .select(
-      "status",
-      "subtotal",
-      "shipping",
-      "total",
-      "costOfGoods",
-      "costPending",
-    )
+    .select(...SALE_FIGURE_FIELDS)
     .limit(SALES_SUM_LIMIT + 1)
     .get();
 
   const counted = snapshot.docs.slice(0, SALES_SUM_LIMIT);
   return {
-    ...summarizeSales(counted.map(toFigures)),
+    ...summarizeSales(counted.map((doc) => readSaleFigures(doc.data() ?? {}))),
     truncated: snapshot.docs.length > SALES_SUM_LIMIT,
   };
 }

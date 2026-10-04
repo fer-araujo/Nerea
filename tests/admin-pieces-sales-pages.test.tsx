@@ -43,6 +43,7 @@ vi.mock("@/app/admin/(panel)/piezas/actions", () => ({
 vi.mock("@/app/admin/(panel)/ventas/actions", () => ({
   recordManualSaleAction: vi.fn(),
   voidSaleAction: vi.fn(),
+  refreshSaleFeeAction: vi.fn(),
 }));
 
 import AdminPiecesPage from "@/app/admin/(panel)/piezas/page";
@@ -239,12 +240,15 @@ describe("Ventas page", () => {
   const TOTALS = {
     count: 2,
     voidedCount: 1,
+    testCount: 0,
     subtotal: 275_000,
     shipping: 15_000,
     total: 290_000,
     costOfGoods: 90_000,
     grossProfit: 185_000,
     pendingCount: 0,
+    fees: 0,
+    pendingFeeCount: 0,
     truncated: false,
   };
 
@@ -260,9 +264,31 @@ describe("Ventas page", () => {
       total: 200_000,
       costOfGoods: 60_000,
       costPending: false,
+      livemode: true,
+      fee: 0,
+      feePending: false,
+      net: null,
       note: null,
       ...overrides,
     };
+  }
+
+  // An online sale with its commission read from Stripe.
+  function onlineSale(overrides: Record<string, unknown> = {}) {
+    return sale({
+      id: "stripe_cs_live_1",
+      source: "stripe",
+      fee: 7_540,
+      net: 192_460,
+      ...overrides,
+    });
+  }
+
+  // The list item (<li>) of the sale whose heading is `title`.
+  function rowOf(title: string, index = 0): HTMLElement {
+    return screen
+      .getAllByRole("heading", { name: title })
+      [index].closest("li") as HTMLElement;
   }
 
   async function renderPage(search: Record<string, string> = {}) {
@@ -383,15 +409,152 @@ describe("Ventas page", () => {
     expect(within(live).getByRole("button", { name: "Anular venta" })).toBeInTheDocument();
   });
 
-  it("offers 'Anular venta' on manual sales only, never on a Stripe sale", async () => {
+  it("never offers 'Anular venta' on a LIVE Stripe sale: it is refunded in Stripe", async () => {
     listSalesMock.mockResolvedValue({
-      sales: [sale({ id: "stripe_cs_1", source: "stripe" })],
+      sales: [onlineSale({ livemode: true })],
       hasNextPage: false,
     });
 
     await renderPage();
 
     expect(screen.queryByRole("button", { name: "Anular venta" })).not.toBeInTheDocument();
+  });
+
+  describe("Stripe test-mode sales", () => {
+    it("badges a test sale 'Prueba' and mutes it, like a voided one", async () => {
+      listSalesMock.mockResolvedValue({
+        sales: [onlineSale({ id: "stripe_cs_test_1", livemode: false })],
+        hasNextPage: false,
+      });
+
+      await renderPage();
+
+      const row = rowOf("Anillo Luna");
+      expect(row).toHaveClass("opacity-60");
+      expect(within(row).getByText("Prueba")).toBeInTheDocument();
+      // It is still an online sale.
+      expect(within(row).getByText("Tienda en línea")).toBeInTheDocument();
+    });
+
+    it("shows no badge and no muting on a live sale", async () => {
+      listSalesMock.mockResolvedValue({
+        sales: [onlineSale({ livemode: true })],
+        hasNextPage: false,
+      });
+
+      await renderPage();
+
+      const row = rowOf("Anillo Luna");
+      expect(row).not.toHaveClass("opacity-60");
+      expect(within(row).queryByText("Prueba")).not.toBeInTheDocument();
+    });
+
+    it("offers 'Anular venta' on a test sale, so a test purchase can be cleaned up", async () => {
+      listSalesMock.mockResolvedValue({
+        sales: [onlineSale({ id: "stripe_cs_test_1", livemode: false })],
+        hasNextPage: false,
+      });
+
+      await renderPage();
+
+      expect(
+        within(rowOf("Anillo Luna")).getByRole("button", { name: "Anular venta" }),
+      ).toBeInTheDocument();
+    });
+
+    it("badges a voided test sale both ways and offers no way to void it again", async () => {
+      listSalesMock.mockResolvedValue({
+        sales: [onlineSale({ id: "stripe_cs_test_1", livemode: false, status: "void" })],
+        hasNextPage: false,
+      });
+
+      await renderPage();
+
+      const row = within(rowOf("Anillo Luna"));
+      expect(row.getByText("Prueba")).toBeInTheDocument();
+      expect(row.getByText("Anulada")).toBeInTheDocument();
+      expect(row.queryByRole("button", { name: "Anular venta" })).not.toBeInTheDocument();
+    });
+
+    it("says how many test sales the totals left out", async () => {
+      sumSalesMock.mockResolvedValue({ ...TOTALS, voidedCount: 0, testCount: 2 });
+
+      await renderPage();
+
+      expect(screen.getByText("2 ventas · 2 de prueba (no cuentan)")).toBeInTheDocument();
+    });
+
+    it("uses the singular for one, and lists voided and test sales together", async () => {
+      sumSalesMock.mockResolvedValue({ ...TOTALS, voidedCount: 1, testCount: 1 });
+
+      await renderPage();
+
+      expect(
+        screen.getByText("2 ventas · 1 anulada (no cuentan) · 1 de prueba (no cuenta)"),
+      ).toBeInTheDocument();
+    });
+
+    it("says nothing about test sales when there are none", async () => {
+      sumSalesMock.mockResolvedValue({ ...TOTALS, voidedCount: 0, testCount: 0 });
+
+      await renderPage();
+
+      expect(screen.queryByText(/de prueba/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("commissions", () => {
+    it("shows an online sale's commission (Stripe's fee with the IVA) and what Stripe deposits", async () => {
+      listSalesMock.mockResolvedValue({ sales: [onlineSale()], hasNextPage: false });
+
+      await renderPage();
+
+      const row = within(rowOf("Anillo Luna"));
+      expect(row.getByText("Comisión $75.40")).toBeInTheDocument();
+      expect(row.getByText("Neto $1,924.60")).toBeInTheDocument();
+      expect(row.queryByText("Comisión pendiente")).not.toBeInTheDocument();
+      expect(row.queryByRole("button", { name: "Actualizar comisión" })).not.toBeInTheDocument();
+    });
+
+    it("shows a manual sale's terminal commission, and $0.00 for cash, with no net", async () => {
+      listSalesMock.mockResolvedValue({
+        sales: [sale({ id: "terminal", fee: 2_900 }), sale({ id: "cash", fee: 0 })],
+        hasNextPage: false,
+      });
+
+      await renderPage();
+
+      expect(within(rowOf("Anillo Luna", 0)).getByText("Comisión $29.00")).toBeInTheDocument();
+      expect(within(rowOf("Anillo Luna", 1)).getByText("Comisión $0.00")).toBeInTheDocument();
+      expect(screen.queryByText(/^Neto/)).not.toBeInTheDocument();
+    });
+
+    it("says the commission is pending, with an 'Actualizar comisión' button, for an online sale whose fee was not read", async () => {
+      listSalesMock.mockResolvedValue({
+        sales: [onlineSale({ fee: 0, net: null, feePending: true })],
+        hasNextPage: false,
+      });
+
+      await renderPage();
+
+      const row = within(rowOf("Anillo Luna"));
+      expect(row.getByText("Comisión pendiente")).toBeInTheDocument();
+      expect(row.getByRole("button", { name: "Actualizar comisión" })).toBeInTheDocument();
+      expect(row.queryByText(/^Neto/)).not.toBeInTheDocument();
+    });
+
+    it("offers no refresh on a voided sale", async () => {
+      listSalesMock.mockResolvedValue({
+        sales: [onlineSale({ fee: 0, net: null, feePending: true, status: "void" })],
+        hasNextPage: false,
+      });
+
+      await renderPage();
+
+      expect(
+        screen.queryByRole("button", { name: "Actualizar comisión" }),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("renders a stored note as plain text, never as markup", async () => {

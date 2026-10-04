@@ -3,8 +3,11 @@ import {
   FakeFirestore,
   FakeTimestamp,
   SERVER_TIMESTAMP,
+  type FakeTransaction,
 } from "@/tests/helpers/fake-firestore";
 import type { Product } from "@/lib/commerce/types";
+
+type TransactionBody = (tx: FakeTransaction) => Promise<unknown>;
 
 vi.mock("server-only", () => ({}));
 
@@ -30,6 +33,15 @@ vi.mock("@/lib/commerce", () => ({
   },
 }));
 
+// Stripe is mocked at its client: the recorder asks it for the payment's
+// balance transaction (the fee and the net). How that answer is read is in
+// tests/stripe-fees.test.ts; here it is what the sale freezes.
+const retrieveMock = vi.fn();
+const getStripeClientMock = vi.fn();
+vi.mock("@/lib/commerce/stripe/client", () => ({
+  getStripeClient: () => getStripeClientMock(),
+}));
+
 import { isAlreadyExistsError } from "@/lib/admin/data/shared";
 import {
   recordStripeSale,
@@ -39,6 +51,20 @@ import {
 const SESSION_ID = "cs_test_a1B2c3D4";
 const SALE_PATH = `sales/stripe_${SESSION_ID}`;
 const CREATED = 1_790_000_000; // unix seconds
+// What Stripe charged on the 200_000 the customer paid.
+const FEE = 7_540;
+const NET = 192_460;
+const EXPAND = ["payment_intent.latest_charge.balance_transaction"];
+
+// The session as Stripe returns it with the balance transaction expanded.
+function expandedSession(
+  transaction: Record<string, unknown> | null = { fee: FEE, net: NET, currency: "mxn" },
+) {
+  return {
+    id: SESSION_ID,
+    payment_intent: { latest_charge: { balance_transaction: transaction } },
+  };
+}
 
 function product(overrides: Partial<Product> = {}): Product {
   return {
@@ -84,6 +110,10 @@ beforeEach(() => {
   fake = new FakeFirestore();
   configured = true;
   stockCatalog(product());
+  getStripeClientMock.mockReturnValue({
+    checkout: { sessions: { retrieve: retrieveMock } },
+  });
+  retrieveMock.mockResolvedValue(expandedSession());
 });
 
 afterEach(() => {
@@ -111,6 +141,11 @@ describe("recordStripeSale", () => {
       costOfGoods: 60_000,
       costPending: false,
       stripeSessionId: SESSION_ID,
+      // cs_test_… is a test-mode session.
+      livemode: false,
+      stripeFee: FEE,
+      stripeNet: NET,
+      feePending: false,
       createdAt: expect.any(FakeTimestamp),
     });
     // The payment's own instant, not the moment the webhook happened to run.
@@ -132,6 +167,176 @@ describe("recordStripeSale", () => {
     const ops = fake.opsMatching(/^sales\//);
     expect(ops).toHaveLength(1);
     expect(ops[0].kind).toBe("create");
+  });
+});
+
+describe("recordStripeSale: livemode", () => {
+  it("stores the mode Stripe reports for the session", async () => {
+    await recordStripeSale(session({ livemode: false }));
+    expect(fake.get(SALE_PATH)?.livemode).toBe(false);
+
+    await recordStripeSale(session({ id: "cs_live_a1B2c3D4", livemode: true }));
+    expect(fake.get("sales/stripe_cs_live_a1B2c3D4")?.livemode).toBe(true);
+  });
+
+  it("trusts what Stripe reports over what the session id looks like", async () => {
+    await recordStripeSale(session({ livemode: true }));
+
+    expect(fake.get(SALE_PATH)?.livemode).toBe(true);
+  });
+
+  it.each([
+    ["cs_test_a1B2c3D4", false],
+    ["cs_live_a1B2c3D4", true],
+    // No mode information at all counts as a real sale.
+    ["cs_other_a1B2c3D4", true],
+  ])("falls back to the session id when the session carries no livemode: %s -> live is %s", async (id, expected) => {
+    await recordStripeSale(session({ id }));
+
+    expect(fake.get(`sales/stripe_${id}`)?.livemode).toBe(expected);
+  });
+
+  it("falls back to the session id for a null livemode too", async () => {
+    await recordStripeSale(session({ livemode: null }));
+
+    expect(fake.get(SALE_PATH)?.livemode).toBe(false);
+  });
+
+  it("stores a boolean, never anything else a payload might carry", async () => {
+    await recordStripeSale(session({ livemode: "false" as never }));
+
+    // Not a boolean: ignored, and the session id decides.
+    expect(fake.get(SALE_PATH)?.livemode).toBe(false);
+    await recordStripeSale(session({ id: "cs_live_x1", livemode: "no" as never }));
+    expect(fake.get("sales/stripe_cs_live_x1")?.livemode).toBe(true);
+  });
+});
+
+describe("recordStripeSale: Stripe's fee and net", () => {
+  it("freezes the fee and the net from the payment's balance transaction", async () => {
+    await expect(recordStripeSale(session())).resolves.toBe("recorded");
+
+    expect(fake.get(SALE_PATH)).toMatchObject({
+      stripeFee: FEE,
+      stripeNet: NET,
+      feePending: false,
+    });
+  });
+
+  it("asks Stripe for the session with the balance transaction expanded, in a bounded call", async () => {
+    await recordStripeSale(session());
+
+    expect(retrieveMock).toHaveBeenCalledTimes(1);
+    expect(retrieveMock).toHaveBeenCalledWith(
+      SESSION_ID,
+      { expand: EXPAND },
+      // The webhook waits on this: it must not hang, nor retry on its own.
+      { timeout: 4_000, maxNetworkRetries: 0 },
+    );
+  });
+
+  it("reads the fee BEFORE the sale is created, never after", async () => {
+    const order: string[] = [];
+    retrieveMock.mockImplementation(async () => {
+      order.push("retrieve");
+      return expandedSession();
+    });
+    const run = fake.runTransaction.bind(fake);
+    vi.spyOn(fake, "runTransaction").mockImplementation((async (update: TransactionBody) => {
+      order.push("create");
+      return run(update);
+    }) as FakeFirestore["runTransaction"]);
+
+    await recordStripeSale(session());
+
+    expect(order).toEqual(["retrieve", "create"]);
+  });
+
+  it("stores a fee of ZERO as a known fee: a free payment is not a pending one", async () => {
+    retrieveMock.mockResolvedValue(expandedSession({ fee: 0, net: 200_000, currency: "mxn" }));
+
+    await recordStripeSale(session());
+
+    expect(fake.get(SALE_PATH)).toMatchObject({
+      stripeFee: 0,
+      stripeNet: 200_000,
+      feePending: false,
+    });
+  });
+
+  it("still records the sale, as feePending, when the call to Stripe fails: no fee, no net, no failure", async () => {
+    retrieveMock.mockRejectedValue(new Error("network down"));
+
+    await expect(recordStripeSale(session())).resolves.toBe("recorded");
+
+    const stored = fake.get(SALE_PATH);
+    expect(stored).toMatchObject({ source: "stripe", status: "active", feePending: true });
+    expect(stored).not.toHaveProperty("stripeFee");
+    expect(stored).not.toHaveProperty("stripeNet");
+    // Everything else about the sale is intact.
+    expect(stored).toMatchObject({ subtotal: 185_000, shipping: 15_000, total: 200_000 });
+    expect(fake.opsMatching(/^sales\//, "create")).toHaveLength(1);
+  });
+
+  it("still records the sale as feePending when Stripe is not configured", async () => {
+    getStripeClientMock.mockReturnValue(undefined);
+
+    await expect(recordStripeSale(session())).resolves.toBe("recorded");
+
+    expect(fake.get(SALE_PATH)).toMatchObject({ feePending: true });
+    expect(retrieveMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the payment intent is only an id (not expanded)", { id: SESSION_ID, payment_intent: "pi_123" }],
+    ["there is no payment intent", { id: SESSION_ID, payment_intent: null }],
+    ["the charge is only an id", { id: SESSION_ID, payment_intent: { latest_charge: "ch_123" } }],
+    ["there is no charge yet", { id: SESSION_ID, payment_intent: { latest_charge: null } }],
+    ["the balance transaction is only an id", expandedSession("txn_123" as never)],
+    ["the balance transaction is not settled yet", expandedSession(null)],
+    ["the fee is in another currency", expandedSession({ fee: 400, net: 9_600, currency: "usd" })],
+    ["the fee is negative", expandedSession({ fee: -1, net: 200_000, currency: "mxn" })],
+    ["the fee is fractional", expandedSession({ fee: 75.4, net: 192_460, currency: "mxn" })],
+    ["the net is missing", expandedSession({ fee: FEE, currency: "mxn" })],
+  ])("records the sale as feePending when %s", async (_label, answer) => {
+    retrieveMock.mockResolvedValue(answer);
+
+    await expect(recordStripeSale(session())).resolves.toBe("recorded");
+
+    const stored = fake.get(SALE_PATH);
+    expect(stored).toMatchObject({ feePending: true });
+    expect(stored).not.toHaveProperty("stripeFee");
+    expect(stored).not.toHaveProperty("stripeNet");
+  });
+
+  it("does not ask Stripe at all for a session it will not record", async () => {
+    await recordStripeSale(session({ metadata: { handles: "" } }));
+    await recordStripeSale(session({ id: "cs/../../x" }));
+    configured = false;
+    await recordStripeSale(session());
+
+    expect(retrieveMock).not.toHaveBeenCalled();
+  });
+
+  it("still rejects when the catalog cannot be read, writing nothing, so Stripe retries the delivery", async () => {
+    getProductByHandleMock.mockRejectedValue(new Error("network down"));
+
+    await expect(recordStripeSale(session())).rejects.toThrow("network down");
+
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("does not turn a missing fee into a failure to record, nor a later retry into a second sale", async () => {
+    retrieveMock.mockRejectedValueOnce(new Error("network down"));
+    await recordStripeSale(session());
+    const first = fake.get(SALE_PATH);
+
+    // Stripe has the fee by the time the event is delivered again.
+    await expect(recordStripeSale(session())).resolves.toBe("duplicate");
+
+    expect(fake.directChildren("sales")).toHaveLength(1);
+    expect(fake.get(SALE_PATH)).toEqual(first);
+    expect(fake.get(SALE_PATH)).toMatchObject({ feePending: true });
   });
 });
 
@@ -436,8 +641,31 @@ describe("recordStripeSale: no customer data", () => {
     payment_intent: "pi_123",
   };
 
+  // The expanded session Stripe returns for the fee carries the buyer's details
+  // too (the charge's billing details, the customer): none of it may be copied.
+  function expandedSessionWithPii() {
+    return {
+      ...PII,
+      id: SESSION_ID,
+      payment_intent: {
+        receipt_email: "ana.perez@example.com",
+        latest_charge: {
+          billing_details: {
+            name: "Ana Pérez",
+            email: "ana.perez@example.com",
+            phone: "+525512345678",
+            address: { line1: "Calle Falsa 123", city: "Guadalajara", postal_code: "44100" },
+          },
+          receipt_url: "https://pay.stripe.com/receipts/cus_123",
+          balance_transaction: { fee: FEE, net: NET, currency: "mxn" },
+        },
+      },
+    };
+  }
+
   it("stores only the documented fields", async () => {
     seedCost("anillo-luna");
+    retrieveMock.mockResolvedValue(expandedSessionWithPii());
 
     await recordStripeSale({ ...session(), ...PII } as never);
 
@@ -449,7 +677,36 @@ describe("recordStripeSale: no customer data", () => {
         "createdAt",
         "currency",
         "date",
+        "feePending",
         "items",
+        "livemode",
+        "shipping",
+        "source",
+        "status",
+        "stripeFee",
+        "stripeNet",
+        "stripeSessionId",
+        "subtotal",
+        "total",
+      ].sort(),
+    );
+  });
+
+  it("stores only the documented fields when the fee is pending too", async () => {
+    retrieveMock.mockRejectedValue(new Error("network down"));
+
+    await recordStripeSale({ ...session(), ...PII } as never);
+
+    expect(Object.keys(fake.get(SALE_PATH) ?? {}).sort()).toEqual(
+      [
+        "costOfGoods",
+        "costPending",
+        "createdAt",
+        "currency",
+        "date",
+        "feePending",
+        "items",
+        "livemode",
         "shipping",
         "source",
         "status",
@@ -461,6 +718,8 @@ describe("recordStripeSale: no customer data", () => {
   });
 
   it("holds no email, name, address, phone or customer id anywhere in what was written", async () => {
+    retrieveMock.mockResolvedValue(expandedSessionWithPii());
+
     await recordStripeSale({ ...session(), ...PII } as never);
 
     const everything = JSON.stringify([fake.get(SALE_PATH), fake.committed]);

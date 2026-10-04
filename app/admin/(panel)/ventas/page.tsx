@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Pager } from "@/components/admin/Pager";
+import { PeriodNav } from "@/components/admin/PeriodNav";
 import {
   BADGE_ATTENTION_CLASS,
   BADGE_CLASS,
@@ -33,8 +34,10 @@ import {
   type PeriodKey,
   type PeriodRange,
 } from "@/lib/admin/domain/periods";
+import { isVoidableSale } from "@/lib/admin/domain/sales";
 import { parsePageParam } from "@/lib/admin/pagination";
 import { ManualSaleForm, type SalePiece } from "./ManualSaleForm";
+import { RefreshFeeForm } from "./RefreshFeeForm";
 import { VoidSaleForm } from "./VoidSaleForm";
 
 export const metadata: Metadata = {
@@ -42,12 +45,6 @@ export const metadata: Metadata = {
 };
 
 const SALES_PATH = "/admin/ventas";
-
-const PERIOD_LINKS: ReadonlyArray<{ key: PeriodKey; label: string }> = [
-  { key: "this-month", label: "Este mes" },
-  { key: "last-month", label: "Mes anterior" },
-  { key: "this-year", label: "Este año" },
-];
 
 // Shown in the atelier's own time no matter where the server runs.
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-MX", {
@@ -144,11 +141,15 @@ function saleHeadline(sale: Sale): string {
 // holds no customer data, so there is none to show.
 function SaleRow({ sale }: { sale: Sale }) {
   const voided = sale.status === "void";
+  // Made with Stripe's test keys (local testing shares the production
+  // database): not a real sale, so it is shown but never counted.
+  const test = sale.livemode === false;
 
   return (
-    // A voided sale stays on the list, muted: it is history, and it no longer
-    // counts. The "Anulada" badge carries the meaning, not the dimming.
-    <li className={cn("py-5", voided ? "opacity-60" : null)}>
+    // A voided or test sale stays on the list, muted: it is history, and it no
+    // longer counts. The "Anulada" / "Prueba" badge carries the meaning, not
+    // the dimming.
+    <li className={cn("py-5", voided || test ? "opacity-60" : null)}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h3 className="font-display text-lg leading-snug text-ink [overflow-wrap:anywhere]">
           {saleHeadline(sale)}
@@ -166,6 +167,7 @@ function SaleRow({ sale }: { sale: Sale }) {
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className={BADGE_CLASS}>{SALE_SOURCE_LABELS[sale.source]}</span>
+        {test ? <span className={BADGE_CLASS}>Prueba</span> : null}
         {voided ? <span className={BADGE_CLASS}>Anulada</span> : null}
         {sale.costPending ? (
           <span className={BADGE_ATTENTION_CLASS}>Costo pendiente</span>
@@ -207,6 +209,14 @@ function SaleRow({ sale }: { sale: Sale }) {
         <span>Envío {formatMXN(sale.shipping)}</span>
         <span>Costo {formatMXN(sale.costOfGoods)}</span>
         <span>Utilidad {formatMXN(sale.subtotal - sale.costOfGoods)}</span>
+        {/* Stripe's fee with the IVA on it (or the terminal's on a manual
+            sale). "Neto" is what Stripe deposits for an online sale. */}
+        <span>
+          {sale.feePending
+            ? "Comisión pendiente"
+            : `Comisión ${formatMXN(sale.fee)}`}
+        </span>
+        {sale.net !== null ? <span>Neto {formatMXN(sale.net)}</span> : null}
       </p>
 
       {sale.note ? (
@@ -215,7 +225,16 @@ function SaleRow({ sale }: { sale: Sale }) {
         </p>
       ) : null}
 
-      {sale.source === "manual" && !voided ? (
+      {/* A voided sale has nothing left to refresh. */}
+      {sale.feePending && !voided ? (
+        <div className="mt-2">
+          <RefreshFeeForm saleId={sale.id} />
+        </div>
+      ) : null}
+
+      {/* A manual sale, or an online one made in test mode. A live online sale
+          is refunded in Stripe, never voided here. */}
+      {!voided && isVoidableSale(sale.source, sale.livemode) ? (
         <div className="mt-2">
           <VoidSaleForm saleId={sale.id} />
         </div>
@@ -269,26 +288,11 @@ export default async function AdminSalesPage({
         las que hagas por fuera.
       </p>
 
-      <nav
-        aria-label="Periodo"
-        className="mt-10 flex gap-6 overflow-x-auto border-b border-line"
-      >
-        {PERIOD_LINKS.map((item) => (
-          <Link
-            key={item.key}
-            href={listHref(item.key, 1)}
-            aria-current={item.key === period ? "page" : undefined}
-            className={cn(
-              "-mb-px inline-flex min-h-11 shrink-0 items-center border-b-2 font-sans text-sm transition-colors",
-              item.key === period
-                ? "border-brass text-ink"
-                : "border-transparent text-graphite hover:text-ink",
-            )}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
+      <PeriodNav
+        current={period}
+        hrefFor={(key) => listHref(key, 1)}
+        className="mt-10"
+      />
 
       <div className={cn(PANEL_CLASS, "mt-8")}>
         <p className={LABEL_CLASS}>Ventas · {label}</p>
@@ -305,6 +309,9 @@ export default async function AdminSalesPage({
               {total.count} {total.count === 1 ? "venta" : "ventas"}
               {total.voidedCount > 0
                 ? ` · ${total.voidedCount} ${total.voidedCount === 1 ? "anulada" : "anuladas"} (no cuentan)`
+                : ""}
+              {total.testCount > 0
+                ? ` · ${total.testCount} de prueba (${total.testCount === 1 ? "no cuenta" : "no cuentan"})`
                 : ""}
             </p>
 

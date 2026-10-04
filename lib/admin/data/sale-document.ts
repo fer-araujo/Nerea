@@ -24,6 +24,22 @@ export interface NewSale {
   costPending: boolean;
   /** Stripe sales only: the Checkout Session id (an opaque reference). */
   stripeSessionId?: string;
+  /**
+   * Stripe sales only: whether the session was made with the LIVE keys. A
+   * test-mode sale is stored (so it can be seen and voided) but is left out of
+   * every total.
+   */
+  livemode?: boolean;
+  /**
+   * Stripe sales only: Stripe's fee WITH the IVA on it, and what it deposits
+   * (charged minus fee), integer centavos. Absent while `feePending`.
+   */
+  stripeFee?: number;
+  stripeNet?: number;
+  /** Stripe sales only: `true` when the fee could not be read yet. */
+  feePending?: boolean;
+  /** Manual sales only: the terminal's commission, integer centavos. */
+  terminalFee?: number;
   /** Manual sales only. */
   note?: string;
   /** Opaque uid of the admin; a Stripe sale has none. */
@@ -50,6 +66,12 @@ export function buildSaleDocument(sale: NewSale): Record<string, unknown> {
     costOfGoods: sale.costOfGoods,
     costPending: sale.costPending,
     ...(sale.stripeSessionId ? { stripeSessionId: sale.stripeSessionId } : {}),
+    ...(sale.livemode !== undefined ? { livemode: sale.livemode } : {}),
+    ...(sale.stripeFee !== undefined ? { stripeFee: sale.stripeFee } : {}),
+    ...(sale.stripeNet !== undefined ? { stripeNet: sale.stripeNet } : {}),
+    ...(sale.feePending !== undefined ? { feePending: sale.feePending } : {}),
+    // A manual sale with no terminal commission (cash) stores no field at all.
+    ...(sale.terminalFee ? { terminalFee: sale.terminalFee } : {}),
     ...(sale.note ? { note: sale.note } : {}),
     createdAt: FieldValue.serverTimestamp(),
     ...(sale.actor ? { actor: sale.actor } : {}),

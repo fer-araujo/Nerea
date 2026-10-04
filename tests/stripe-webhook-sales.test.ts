@@ -28,6 +28,9 @@ vi.mock("@/lib/admin/firebase/admin", () => ({
 
 const getStripeClientMock = vi.fn();
 const constructEventMock = vi.fn();
+// The same client verifies the signature and, when a sale is recorded, reads
+// the payment's balance transaction (the fee and the net).
+const retrieveMock = vi.fn();
 vi.mock("@/lib/commerce/stripe/client", () => ({
   getStripeClient: () => getStripeClientMock(),
 }));
@@ -112,6 +115,15 @@ beforeEach(() => {
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_secret";
   getStripeClientMock.mockReturnValue({
     webhooks: { constructEvent: constructEventMock },
+    checkout: { sessions: { retrieve: retrieveMock } },
+  });
+  retrieveMock.mockResolvedValue({
+    id: SESSION_ID,
+    payment_intent: {
+      latest_charge: {
+        balance_transaction: { fee: 7_540, net: 192_460, currency: "mxn" },
+      },
+    },
   });
   markProductsSoldMock.mockResolvedValue(MARKED);
   getProductByHandleMock.mockResolvedValue({
@@ -154,6 +166,43 @@ describe("webhook -> sales ledger: recording", () => {
       costPending: false,
       stripeSessionId: SESSION_ID,
     });
+  });
+
+  it("stores the mode of the verified session and what Stripe charged for the payment", async () => {
+    await deliver(completedSession({ livemode: true, id: "cs_live_a1B2c3D4" }));
+
+    expect(fake.get("sales/stripe_cs_live_a1B2c3D4")).toMatchObject({
+      livemode: true,
+      stripeFee: 7_540,
+      stripeNet: 192_460,
+      feePending: false,
+    });
+
+    await deliver(completedSession({ livemode: false }));
+
+    expect(fake.get(SALE_PATH)).toMatchObject({ livemode: false, stripeFee: 7_540 });
+  });
+
+  it("still answers 200 and records the sale, as feePending, when Stripe cannot give the fee", async () => {
+    retrieveMock.mockRejectedValue(new Error("network down"));
+
+    const response = await deliver();
+
+    expect(response.status).toBe(200);
+    expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna"]);
+    const stored = fake.get(SALE_PATH);
+    expect(stored).toMatchObject({ source: "stripe", total: 200_000, feePending: true });
+    expect(stored).not.toHaveProperty("stripeFee");
+    expect(stored).not.toHaveProperty("stripeNet");
+  });
+
+  it("does not answer 500 for a missing fee, so Stripe never redelivers an event for that", async () => {
+    retrieveMock.mockResolvedValue({ id: SESSION_ID, payment_intent: { latest_charge: null } });
+
+    const response = await deliver();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ received: true });
   });
 
   it("marks sold BEFORE it records, so a failing ledger can never leave a paid piece on sale", async () => {
@@ -448,6 +497,25 @@ describe("webhook -> sales ledger: the signature gate still comes first", () => 
 
 describe("webhook -> sales ledger: no customer data is ever stored", () => {
   it("keeps the buyer's email, name, address, phone and customer id out of the stored sale", async () => {
+    // The session expanded for the fee carries the buyer's details too: the
+    // charge's billing details, the customer.
+    retrieveMock.mockResolvedValue({
+      id: SESSION_ID,
+      customer: "cus_PII123",
+      customer_details: { email: "ana.perez@example.com", name: "Ana Pérez" },
+      payment_intent: {
+        receipt_email: "ana.perez@example.com",
+        latest_charge: {
+          billing_details: {
+            name: "Ana Pérez",
+            phone: "+525512345678",
+            address: { line1: "Calle Falsa 123", city: "Guadalajara", postal_code: "44100" },
+          },
+          balance_transaction: { fee: 7_540, net: 192_460, currency: "mxn" },
+        },
+      },
+    });
+
     await deliver();
 
     const stored = fake.get(SALE_PATH);
@@ -467,10 +535,14 @@ describe("webhook -> sales ledger: no customer data is ever stored", () => {
         "createdAt",
         "currency",
         "date",
+        "feePending",
         "items",
+        "livemode",
         "shipping",
         "source",
         "status",
+        "stripeFee",
+        "stripeNet",
         "stripeSessionId",
         "subtotal",
         "total",

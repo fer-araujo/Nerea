@@ -38,6 +38,18 @@ vi.mock("@/lib/site-settings/adapter", () => ({
   getSiteSettings: (...args: unknown[]) => getSiteSettingsMock(...args),
 }));
 
+// The cart island needs the CartProvider and the router a real layout
+// supplies; WHEN it empties the cart is in tests/clear-cart-on-success.test.tsx.
+// Here it is a marker, so the page is shown to mount it. createElement, not
+// JSX: the factory runs before this file's own imports.
+vi.mock("@/components/checkout/ClearCartOnSuccess", async () => {
+  const React = await import("react");
+  return {
+    ClearCartOnSuccess: () =>
+      React.createElement("span", { "data-testid": "clear-cart-on-success" }),
+  };
+});
+
 import CheckoutSuccessPage from "../app/[locale]/checkout/success/page";
 
 const NUMBER = "5215512345678";
@@ -129,5 +141,13 @@ describe("checkout success page — follow-up CTAs", () => {
     expect(
       screen.getByRole("link", { name: esMessages.Checkout.successCta }),
     ).toHaveAttribute("href", "/es/shop");
+  });
+});
+
+describe("checkout success page — cart", () => {
+  it("mounts the island that empties the cart after a paid checkout", async () => {
+    await renderPage("es", { whatsappNumber: NUMBER });
+
+    expect(screen.getByTestId("clear-cart-on-success")).toBeInTheDocument();
   });
 });

@@ -164,7 +164,8 @@ describe("checkoutAction — server-side re-pricing", () => {
         // No `x-forwarded-proto` header is mocked, the host isn't
         // localhost, and NEXT_PUBLIC_SITE_URL is unset, so resolveOrigin()'s
         // header-based fallback correctly picks "https".
-        successUrl: "https://nerea-test.example/es/checkout/success",
+        successUrl:
+          "https://nerea-test.example/es/checkout/success?session_id={CHECKOUT_SESSION_ID}",
         cancelUrl: "https://nerea-test.example/es/shop",
         shippingFee: 0,
         locale: "es",
@@ -734,10 +735,43 @@ describe("checkoutAction — resolveOrigin", () => {
     expect(createCheckoutSessionMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        successUrl: "https://nerea.example/es/checkout/success",
+        successUrl:
+          "https://nerea.example/es/checkout/success?session_id={CHECKOUT_SESSION_ID}",
         cancelUrl: "https://nerea.example/es/shop",
       }),
     );
+  });
+});
+
+describe("checkoutAction — success URL", () => {
+  async function successUrlFor(locale: "es" | "en"): Promise<string> {
+    getAvailabilityMock.mockResolvedValue({ [LINE.handle]: "available" });
+    createCheckoutSessionMock.mockResolvedValue(
+      "https://checkout.stripe.com/c/test_session",
+    );
+
+    await checkoutAction([LINE], locale);
+
+    return createCheckoutSessionMock.mock.calls[0][1].successUrl as string;
+  }
+
+  it("carries Stripe's session id placeholder, so the success page can tell a real return", async () => {
+    const successUrl = await successUrlFor("es");
+
+    expect(successUrl).toContain("?session_id={CHECKOUT_SESSION_ID}");
+    // The cancel URL is a plain page: nothing to substitute there.
+    expect(createCheckoutSessionMock.mock.calls[0][1].cancelUrl).not.toContain(
+      "session_id",
+    );
+  });
+
+  it("keeps the placeholder literal: percent-encoded braces are not substituted by Stripe", async () => {
+    const successUrl = await successUrlFor("en");
+
+    expect(successUrl).toBe(
+      "https://nerea-test.example/en/checkout/success?session_id={CHECKOUT_SESSION_ID}",
+    );
+    expect(successUrl).not.toMatch(/%7B|%7D/i);
   });
 });
 

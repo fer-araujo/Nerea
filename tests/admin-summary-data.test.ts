@@ -47,8 +47,8 @@ function seedSale(id: string, overrides: Record<string, unknown> = {}) {
     total: 115_000,
     costOfGoods: 40_000,
     costPending: false,
-    // Fields the dashboard must never need.
     source: "manual",
+    // Fields the dashboard must never need.
     items: [{ handle: "anillo-luna", title: "Anillo Luna", price: 100_000 }],
     note: "private",
     ...overrides,
@@ -101,7 +101,59 @@ describe("readSummaryLedger", () => {
         total: 115_000,
         costOfGoods: 7_000,
         costPending: true,
+        livemode: true,
+        fee: 0,
+        feePending: false,
       },
+    ]);
+  });
+
+  it("reads which sales are test-mode, from the stored livemode or, for older documents, the session id", async () => {
+    seedSale("stored-test", {
+      source: "stripe",
+      livemode: false,
+      date: ts(new Date("2026-10-05T06:00:00Z")),
+    });
+    seedSale("old-test", {
+      source: "stripe",
+      stripeSessionId: "cs_test_old",
+      date: ts(new Date("2026-10-04T06:00:00Z")),
+    });
+    seedSale("old-live", {
+      source: "stripe",
+      stripeSessionId: "cs_live_old",
+      date: ts(new Date("2026-10-03T06:00:00Z")),
+    });
+    seedSale("manual", { date: ts(new Date("2026-10-02T06:00:00Z")) });
+
+    const ledger = await readSummaryLedger(WINDOW);
+
+    // Newest first.
+    expect(ledger?.sales.map((sale) => sale.livemode)).toEqual([false, false, true, true]);
+  });
+
+  it("reads each sale's commission: Stripe's fee for an online sale, the terminal's for a manual one", async () => {
+    seedSale("online", {
+      source: "stripe",
+      livemode: true,
+      stripeFee: 7_540,
+      stripeNet: 192_460,
+      date: ts(new Date("2026-10-04T06:00:00Z")),
+    });
+    seedSale("pending", {
+      source: "stripe",
+      livemode: true,
+      feePending: true,
+      date: ts(new Date("2026-10-03T06:00:00Z")),
+    });
+    seedSale("terminal", { terminalFee: 2_900, date: ts(new Date("2026-10-02T06:00:00Z")) });
+
+    const ledger = await readSummaryLedger(WINDOW);
+
+    expect(ledger?.sales.map((sale) => [sale.fee, sale.feePending])).toEqual([
+      [7_540, false],
+      [0, true],
+      [2_900, false],
     ]);
   });
 
@@ -156,7 +208,15 @@ describe("readSummaryLedger", () => {
       "total",
       "costOfGoods",
       "costPending",
+      "source",
+      "livemode",
+      "stripeSessionId",
+      "stripeFee",
+      "terminalFee",
     ]);
+    // Never the items or a note.
+    expect(salesQuery?.select).not.toContain("items");
+    expect(salesQuery?.select).not.toContain("note");
     expect(purchasesQuery?.select).toEqual(["date", "totalCost"]);
   });
 

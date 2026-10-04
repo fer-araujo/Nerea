@@ -89,6 +89,9 @@ function saleRow(overrides: Record<string, unknown> = {}) {
     total: 100_000,
     costOfGoods: 40_000,
     costPending: false,
+    livemode: true,
+    fee: 0,
+    feePending: false,
     ...overrides,
   };
 }
@@ -381,6 +384,157 @@ describe("Resumen page: the figures", () => {
     expect(within(card("Utilidad bruta")).getByText("Margen —")).toBeInTheDocument();
     expect(within(card("Ventas")).getByText("0 ventas")).toBeInTheDocument();
     expect(within(card("Ventas con costo pendiente")).getByText("0")).toBeInTheDocument();
+  });
+
+  describe("commissions", () => {
+    it("shows the commissions and the profit after them: ventas - comisiones - costo de lo vendido", async () => {
+      readSummaryLedgerMock.mockResolvedValue(
+        ledger({
+          sales: [
+            // An online sale: Stripe's fee with the IVA on it.
+            saleRow({ subtotal: 185_000, total: 200_000, shipping: 15_000, costOfGoods: 60_000, fee: 7_540 }),
+            // A manual sale: the terminal's commission.
+            saleRow({ subtotal: 90_000, total: 90_000, costOfGoods: 30_000, fee: 2_900 }),
+          ],
+        }),
+      );
+
+      await renderPage();
+
+      expect(within(card("Comisiones Stripe")).getByText("$104.40")).toBeInTheDocument();
+      // 2,750.00 - 104.40 - 900.00
+      expect(
+        within(card("Utilidad después de comisiones")).getByText("$1,745.60"),
+      ).toBeInTheDocument();
+      // The gross profit is untouched by the commissions.
+      expect(within(card("Utilidad bruta")).getByText("$1,850.00")).toBeInTheDocument();
+      expect(within(card("Ventas")).getByText("$2,750.00")).toBeInTheDocument();
+    });
+
+    it("is zero, and not pending, with nothing sold", async () => {
+      await renderPage();
+
+      expect(within(card("Comisiones Stripe")).getByText("$0.00")).toBeInTheDocument();
+      expect(
+        within(card("Utilidad después de comisiones")).getByText("$0.00"),
+      ).toBeInTheDocument();
+      expect(
+        within(card("Comisiones Stripe")).queryByRole("link", { name: "Actualizar comisiones" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("leaves Stripe test-mode sales out of every figure", async () => {
+      readSummaryLedgerMock.mockResolvedValue(
+        ledger({
+          sales: [
+            saleRow({ subtotal: 100_000, costOfGoods: 40_000, fee: 3_000 }),
+            saleRow({
+              livemode: false,
+              subtotal: 900_000,
+              costOfGoods: 500_000,
+              costPending: true,
+              fee: 70_000,
+              feePending: true,
+            }),
+          ],
+        }),
+      );
+
+      await renderPage();
+
+      expect(within(card("Ventas")).getByText("$1,000.00")).toBeInTheDocument();
+      expect(within(card("Ventas")).getByText("1 venta")).toBeInTheDocument();
+      expect(within(card("Costo de lo vendido")).getByText("$400.00")).toBeInTheDocument();
+      expect(within(card("Comisiones Stripe")).getByText("$30.00")).toBeInTheDocument();
+      expect(
+        within(card("Utilidad después de comisiones")).getByText("$570.00"),
+      ).toBeInTheDocument();
+      expect(within(card("Ventas con costo pendiente")).getByText("0")).toBeInTheDocument();
+      expect(
+        within(card("Comisiones Stripe")).queryByText(/comisión pendiente/),
+      ).not.toBeInTheDocument();
+      // Nor does it show up in the chart's October bar.
+      expect(screen.getByTestId("chart-points").textContent).toContain(
+        "2026-10|octubre de 2026|100000|0|60000",
+      );
+    });
+
+    it("warns, and links to Ventas, when online sales still have their fee pending", async () => {
+      readSummaryLedgerMock.mockResolvedValue(
+        ledger({
+          sales: [
+            saleRow({ fee: 0, feePending: true }),
+            saleRow({ fee: 0, feePending: true }),
+            saleRow({ fee: 4_000 }),
+          ],
+        }),
+      );
+
+      await renderPage();
+
+      const fees = within(card("Comisiones Stripe"));
+      expect(fees.getByText("$40.00")).toBeInTheDocument();
+      expect(
+        fees.getByText(/2 ventas con comisión pendiente: la utilidad después de comisiones es mayor que la real/),
+      ).toBeInTheDocument();
+      expect(fees.getByRole("link", { name: "Actualizar comisiones" })).toHaveAttribute(
+        "href",
+        "/admin/ventas",
+      );
+    });
+
+    it("uses the singular for one pending fee", async () => {
+      readSummaryLedgerMock.mockResolvedValue(
+        ledger({ sales: [saleRow({ fee: 0, feePending: true })] }),
+      );
+
+      await renderPage();
+
+      expect(
+        within(card("Comisiones Stripe")).getByText(/1 venta con comisión pendiente/),
+      ).toBeInTheDocument();
+    });
+
+    it("shows a loss after commissions in red, with its minus sign and the words", async () => {
+      readSummaryLedgerMock.mockResolvedValue(
+        ledger({ sales: [saleRow({ subtotal: 100_000, costOfGoods: 98_000, fee: 5_000 })] }),
+      );
+
+      await renderPage();
+
+      const after = card("Utilidad después de comisiones");
+      expect(within(after).getByText("-$30.00")).toHaveClass("text-garnet");
+      expect(
+        within(after).getByText(/Ventas menos comisiones menos costo de lo vendido · En pérdida/),
+      ).toBeInTheDocument();
+      // The gross profit is still a profit: only the figure after commissions is red.
+      expect(within(card("Utilidad bruta")).getByText("$20.00")).not.toHaveClass("text-garnet");
+    });
+
+    it("shows a profit after commissions in the normal ink color", async () => {
+      stockBusyMonth();
+
+      await renderPage();
+
+      const figure = within(card("Utilidad después de comisiones")).getByText("$1,400.00");
+      expect(figure).toHaveClass("text-ink");
+      expect(
+        within(card("Utilidad después de comisiones")).queryByText(/En pérdida/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("explains, in plain words, what a commission is and what the profit leaves out", async () => {
+      await renderPage();
+
+      expect(
+        screen.getByText(
+          /La comisión es lo que cobra Stripe por cada pago más el IVA de esa comisión/,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/No incluye los impuestos de tus ventas \(IVA, ISR\): esos dependen de tu régimen fiscal/),
+      ).toBeInTheDocument();
+    });
   });
 
   it("keeps a negative cash flow visible", async () => {

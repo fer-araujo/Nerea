@@ -44,9 +44,17 @@ vi.mock("@/lib/commerce/sanity/mark-sold", () => ({
   markProductsSold: (...args: unknown[]) => markProductsSoldMock(...args),
 }));
 
+// What Stripe answers about a payment's fee is covered in tests/stripe-fees.test.ts;
+// here it is the answer "Actualizar comisión" acts on.
+const fetchStripeFeesMock = vi.fn();
+vi.mock("@/lib/admin/data/stripe-fees", () => ({
+  fetchStripeFees: (...args: unknown[]) => fetchStripeFeesMock(...args),
+}));
+
 import { savePieceCostAction } from "@/app/admin/(panel)/piezas/actions";
 import {
   recordManualSaleAction,
+  refreshSaleFeeAction,
   voidSaleAction,
 } from "@/app/admin/(panel)/ventas/actions";
 import { mexicoTodayIso } from "@/lib/admin/domain/periods";
@@ -103,6 +111,17 @@ function seedSale(id: string, overrides: Record<string, unknown> = {}) {
   });
 }
 
+// An online sale whose Stripe fee could not be read when the payment came in.
+function seedPendingStripeSale(id: string, overrides: Record<string, unknown> = {}) {
+  seedSale(id, {
+    source: "stripe",
+    livemode: true,
+    stripeSessionId: id.replace(/^stripe_/, ""),
+    feePending: true,
+    ...overrides,
+  });
+}
+
 function messageOf(result: unknown): string {
   return (result as { message: string }).message;
 }
@@ -139,6 +158,8 @@ beforeEach(() => {
     missing: [],
     failed: [],
   }));
+  // By default Stripe has the fee: Stripe's fee with the IVA, and the net.
+  fetchStripeFeesMock.mockResolvedValue({ fee: 7_540, net: 192_460 });
   stockCatalog();
 });
 
@@ -171,6 +192,13 @@ const ACTIONS: Array<{
     seed: () => seedSale("sale1"),
     refreshes: ["/admin/piezas", "/admin/ventas"],
   },
+  {
+    name: "refreshSaleFeeAction",
+    run: refreshSaleFeeAction,
+    validForm: () => form({ saleId: "stripe_cs_live_1" }),
+    seed: () => seedPendingStripeSale("stripe_cs_live_1"),
+    refreshes: ["/admin/piezas", "/admin/ventas"],
+  },
 ];
 
 describe.each(ACTIONS)("$name", ({ run, validForm, seed, refreshes }) => {
@@ -194,6 +222,8 @@ describe.each(ACTIONS)("$name", ({ run, validForm, seed, refreshes }) => {
     expect(getAdminDbMock).not.toHaveBeenCalled();
     expect(getCatalogProductsMock).not.toHaveBeenCalled();
     expect(markProductsSoldMock).not.toHaveBeenCalled();
+    // Nor is Stripe asked anything on behalf of someone who is not an admin.
+    expect(fetchStripeFeesMock).not.toHaveBeenCalled();
     expect(fake.committed).toHaveLength(0);
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
@@ -217,6 +247,7 @@ describe.each(ACTIONS)("$name", ({ run, validForm, seed, refreshes }) => {
     });
     expect(revalidatePathMock).not.toHaveBeenCalled();
     expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(fetchStripeFeesMock).not.toHaveBeenCalled();
   });
 
   it("returns a generic failure and leaks nothing when Firestore fails", async () => {
@@ -428,6 +459,61 @@ describe("recordManualSaleAction", () => {
     await recordManualSaleAction(form(SALE_FORM));
 
     expect(salesWhenMarked).toBe(1);
+  });
+
+  describe("the terminal's commission", () => {
+    it("stores it in centavos on the sale, with the total the customer paid unchanged", async () => {
+      const result = await recordManualSaleAction(form({ ...SALE_FORM, terminalFee: "67.50" }));
+
+      expect(result).toEqual({ ok: true });
+      const [sale] = fake.directChildren("sales");
+      expect(sale.data).toMatchObject({
+        subtotal: 185_000,
+        shipping: 15_000,
+        total: 200_000,
+        terminalFee: 6_750,
+      });
+    });
+
+    it.each([
+      ["blank", { terminalFee: "" }],
+      ["zero", { terminalFee: "0" }],
+      ["not sent at all", {}],
+    ])("stores no commission when it is %s (cash)", async (_label, extra) => {
+      await recordManualSaleAction(form({ ...SALE_FORM, ...extra }));
+
+      const [sale] = fake.directChildren("sales");
+      expect(sale.data).not.toHaveProperty("terminalFee");
+    });
+
+    it.each([
+      ["text", "abc"],
+      ["more than two decimals", "1.234"],
+      ["negative", "-5"],
+      ["in exponent notation", "1e3"],
+    ])("rejects a commission that is %s before the database, naming the field", async (_label, terminalFee) => {
+      const result = await recordManualSaleAction(form({ ...SALE_FORM, terminalFee }));
+
+      expect(result).toMatchObject({ ok: false, error: "invalid" });
+      expect(messageOf(result)).toContain("Comisión");
+      expect(getAdminDbMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects an absurdly large commission", async () => {
+      const result = await recordManualSaleAction(form({ ...SALE_FORM, terminalFee: "100000.01" }));
+
+      expect(result).toMatchObject({ ok: false, error: "invalid" });
+      expect(messageOf(result)).toContain("Comisión");
+    });
+
+    it("refuses a commission larger than what the customer paid, recording nothing", async () => {
+      // 1,850 of piece + 150 of shipping = 2,000 paid.
+      const result = await recordManualSaleAction(form({ ...SALE_FORM, terminalFee: "2000.01" }));
+
+      expect(result).toMatchObject({ ok: false, error: "invalid-sale" });
+      expect(fake.directChildren("sales")).toHaveLength(0);
+      expect(markProductsSoldMock).not.toHaveBeenCalled();
+    });
   });
 
   it("does not touch the store when 'Marcar como vendida en la tienda' is off", async () => {
@@ -716,14 +802,49 @@ describe("voidSaleAction", () => {
     expect(getCatalogProductsMock).not.toHaveBeenCalled();
   });
 
-  it("answers a typed failure for a Stripe sale and changes nothing", async () => {
-    seedSale("stripe_cs_test_1", { source: "stripe" });
+  it("answers a typed failure for a LIVE Stripe sale and changes nothing", async () => {
+    seedSale("stripe_cs_live_1", {
+      source: "stripe",
+      livemode: true,
+      stripeSessionId: "cs_live_1",
+    });
+
+    const result = await voidSaleAction(form({ saleId: "stripe_cs_live_1" }));
+
+    expect(result).toMatchObject({ ok: false, error: "sale-not-voidable" });
+    expect(messageOf(result)).toContain("manuales y las de prueba");
+    expect(fake.get("sales/stripe_cs_live_1")).toMatchObject({ status: "active" });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("voids a Stripe sale made in TEST mode, keeping it on record and auditing it", async () => {
+    seedSale("stripe_cs_test_1", {
+      source: "stripe",
+      livemode: false,
+      stripeSessionId: "cs_test_1",
+    });
 
     const result = await voidSaleAction(form({ saleId: "stripe_cs_test_1" }));
 
-    expect(result).toMatchObject({ ok: false, error: "sale-not-voidable" });
-    expect(fake.get("sales/stripe_cs_test_1")).toMatchObject({ status: "active" });
-    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true });
+    expect(fake.get("sales/stripe_cs_test_1")).toMatchObject({ status: "void", subtotal: 185_000 });
+    expect(fake.opsMatching(/^sales\//, "delete")).toHaveLength(0);
+    const [audit] = fake.directChildren("auditLog");
+    expect(audit.data).toMatchObject({
+      actor: ADMIN.uid,
+      action: "sale.void",
+      entityId: "stripe_cs_test_1",
+    });
+    expect(revalidatePathMock).toHaveBeenCalled();
+  });
+
+  it("voids an older Stripe sale, from before the livemode field, when its session id is a test one", async () => {
+    seedSale("stripe_cs_test_old", { source: "stripe", stripeSessionId: "cs_test_old" });
+
+    await expect(voidSaleAction(form({ saleId: "stripe_cs_test_old" }))).resolves.toEqual({
+      ok: true,
+    });
+    expect(fake.get("sales/stripe_cs_test_old")).toMatchObject({ status: "void" });
   });
 
   it("answers a typed failure for a sale that does not exist", async () => {
@@ -751,5 +872,102 @@ describe("voidSaleAction", () => {
     expect(result).toMatchObject({ ok: false, error: "invalid" });
     expect(messageOf(result)).toContain("Venta");
     expect(getAdminDbMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshSaleFeeAction", () => {
+  const SALE_ID = "stripe_cs_live_a1B2c3";
+
+  it("stores Stripe's fee and net on the pending sale, audits it with the admin's uid, and refreshes the pages", async () => {
+    seedPendingStripeSale(SALE_ID);
+
+    const result = await refreshSaleFeeAction(form({ saleId: SALE_ID }));
+
+    expect(result).toEqual({ ok: true });
+    expect(fake.get(`sales/${SALE_ID}`)).toMatchObject({
+      stripeFee: 7_540,
+      stripeNet: 192_460,
+      feePending: false,
+      // Nothing else about the sale changes.
+      status: "active",
+      subtotal: 185_000,
+      livemode: true,
+    });
+    const [audit] = fake.directChildren("auditLog");
+    expect(audit.data).toMatchObject({
+      actor: ADMIN.uid,
+      action: "sale.fee-refresh",
+      entity: "sale",
+      entityId: SALE_ID,
+    });
+    expect(JSON.stringify(audit.data)).not.toContain("7540");
+    expect(revalidatePathMock.mock.calls.map(([path]) => path).sort()).toEqual([
+      "/admin/piezas",
+      "/admin/ventas",
+    ]);
+  });
+
+  it("asks Stripe about the session id STORED on the sale, never one that came with the request", async () => {
+    seedPendingStripeSale(SALE_ID);
+
+    await refreshSaleFeeAction(form({ saleId: SALE_ID, sessionId: "cs_live_somebody_elses" }));
+
+    expect(fetchStripeFeesMock).toHaveBeenCalledTimes(1);
+    expect(fetchStripeFeesMock).toHaveBeenCalledWith("cs_live_a1B2c3");
+  });
+
+  it("answers a typed, retryable failure when Stripe cannot give the fee yet, and changes nothing", async () => {
+    seedPendingStripeSale(SALE_ID);
+    fetchStripeFeesMock.mockResolvedValue(null);
+
+    const result = await refreshSaleFeeAction(form({ saleId: SALE_ID }));
+
+    expect(result).toMatchObject({ ok: false, error: "fee-unavailable" });
+    expect(messageOf(result)).toContain("Inténtalo de nuevo");
+    expect(fake.committed).toHaveLength(0);
+    expect(fake.get(`sales/${SALE_ID}`)).toMatchObject({ feePending: true });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("answers a typed failure for a manual sale, which has no Stripe fee to read", async () => {
+    seedSale("sale1");
+
+    const result = await refreshSaleFeeAction(form({ saleId: "sale1" }));
+
+    expect(result).toMatchObject({ ok: false, error: "fee-not-refreshable" });
+    expect(fetchStripeFeesMock).not.toHaveBeenCalled();
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("succeeds quietly, without asking Stripe or writing, when the fee is already known", async () => {
+    seedPendingStripeSale(SALE_ID, { stripeFee: 5_000, stripeNet: 195_000, feePending: false });
+
+    await expect(refreshSaleFeeAction(form({ saleId: SALE_ID }))).resolves.toEqual({ ok: true });
+
+    expect(fetchStripeFeesMock).not.toHaveBeenCalled();
+    expect(fake.committed).toHaveLength(0);
+    expect(fake.get(`sales/${SALE_ID}`)).toMatchObject({ stripeFee: 5_000 });
+  });
+
+  it("answers a typed failure for a sale that does not exist", async () => {
+    const result = await refreshSaleFeeAction(form({ saleId: "ghost" }));
+
+    expect(result).toMatchObject({ ok: false, error: "sale-not-found" });
+    expect(fetchStripeFeesMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a missing id", {}],
+    ["a blank id", { saleId: "" }],
+    ["an id that addresses another path", { saleId: "a/b/c" }],
+    ["a parent escape", { saleId: "../auditLog" }],
+    ["an overlong id", { saleId: "x".repeat(129) }],
+  ])("rejects %s before the database, and before Stripe", async (_label, fields) => {
+    const result = await refreshSaleFeeAction(form(fields));
+
+    expect(result).toMatchObject({ ok: false, error: "invalid" });
+    expect(messageOf(result)).toContain("Venta");
+    expect(getAdminDbMock).not.toHaveBeenCalled();
+    expect(fetchStripeFeesMock).not.toHaveBeenCalled();
   });
 });

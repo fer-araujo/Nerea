@@ -66,6 +66,7 @@ vi.mock("@/app/admin/(panel)/piezas/actions", () => ({
 vi.mock("@/app/admin/(panel)/ventas/actions", () => ({
   recordManualSaleAction: vi.fn(),
   voidSaleAction: vi.fn(),
+  refreshSaleFeeAction: vi.fn(),
 }));
 vi.mock("@/app/admin/(panel)/actions", () => ({ logoutAction: vi.fn() }));
 vi.mock("@/components/admin/AdminShell", () => ({

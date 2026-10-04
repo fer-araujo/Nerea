@@ -14,6 +14,7 @@ import { getPathname } from "@/i18n/navigation";
 import { getShippingFee } from "@/lib/site-settings/adapter";
 import type { Locale } from "@/lib/commerce/types";
 import type { CartLineItem } from "./cart-context";
+import { withSessionIdPlaceholder } from "./checkout-session";
 
 export interface CheckoutPaymentsDisabledResult {
   ok: false;
@@ -217,7 +218,11 @@ export async function checkoutAction(
       getShippingFee(),
     ]);
     redirectUrl = await createCheckoutSession(checkoutLines, {
-      successUrl: `${origin}${getPathname({ href: "/checkout/success", locale })}`,
+      // Stripe fills the session id in on the way back, and the success page
+      // uses it to empty the cart (components/checkout/ClearCartOnSuccess.tsx).
+      successUrl: withSessionIdPlaceholder(
+        `${origin}${getPathname({ href: "/checkout/success", locale })}`,
+      ),
       cancelUrl: `${origin}${getPathname({ href: "/shop", locale })}`,
       shippingFee,
       locale,

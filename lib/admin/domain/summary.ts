@@ -84,7 +84,7 @@ export function marginPercent(
 }
 
 export interface PeriodKpis {
-  /** Sales that count (voided ones do not). */
+  /** Sales that count (voided ones and Stripe test-mode ones do not). */
   salesCount: number;
   voidedCount: number;
   /**
@@ -98,6 +98,21 @@ export interface PeriodKpis {
   /** Utilidad bruta: sales - costOfGoods. Negative when it cost more. */
   grossProfit: number;
   marginPercent: number | null;
+  /**
+   * Comisiones: what the payment processors charged on the counted sales,
+   * integer centavos. For a Stripe sale it is Stripe's fee WITH the IVA on that
+   * fee (Stripe reports them together); for a manual sale, the terminal's. It
+   * does NOT include the taxes on the sale itself (IVA, ISR), which depend on
+   * the tax regime.
+   */
+  fees: number;
+  /**
+   * Utilidad después de comisiones: sales - fees - costOfGoods. Negative when
+   * it cost more.
+   */
+  profitAfterFees: number;
+  /** Counted Stripe sales whose fee was still unknown: they add 0 to `fees`. */
+  pendingFeeCount: number;
   /** Inversiones: what was spent on materials. */
   investments: number;
   purchaseCount: number;
@@ -108,10 +123,11 @@ export interface PeriodKpis {
 }
 
 /**
- * The KPIs of `range`, in one pass over what was read. A voided sale is left
- * out of every figure (and only counted in `voidedCount`); a document with no
- * readable date belongs to no period. The sales rule is `summarizeSales`, the
- * same one the Ventas page totals with, so the two can never disagree.
+ * The KPIs of `range`, in one pass over what was read. A voided sale and a
+ * Stripe test-mode sale are left out of every figure (the voided ones are
+ * counted in `voidedCount`); a document with no readable date belongs to no
+ * period. The sales rule is `summarizeSales`, the same one the Ventas page
+ * totals with, so the two can never disagree.
  */
 export function periodKpis(
   sales: readonly SummarySale[],
@@ -136,6 +152,9 @@ export function periodKpis(
     costOfGoods: totals.costOfGoods,
     grossProfit: totals.grossProfit,
     marginPercent: marginPercent(totals.subtotal, totals.grossProfit),
+    fees: totals.fees,
+    profitAfterFees: totals.subtotal - totals.fees - totals.costOfGoods,
+    pendingFeeCount: totals.pendingFeeCount,
     investments,
     purchaseCount,
     cashFlow: totals.subtotal - investments,
@@ -174,8 +193,8 @@ function monthKeyOf(instant: Date): string {
 /**
  * The last twelve Mexico City months, oldest first and ending with the month
  * of `now`, EMPTY months included (a gap in the chart is information, a
- * missing bar is not). Anything outside those months, a voided sale, or a
- * document with no readable date is left out.
+ * missing bar is not). Anything outside those months, a voided sale, a Stripe
+ * test-mode sale, or a document with no readable date is left out.
  */
 export function monthlyBuckets(
   sales: readonly SummarySale[],
@@ -195,7 +214,7 @@ export function monthlyBuckets(
   const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket] as const));
 
   for (const sale of sales) {
-    if (sale.status === "void" || sale.date === null) {
+    if (sale.status === "void" || !sale.livemode || sale.date === null) {
       continue;
     }
     const bucket = byKey.get(monthKeyOf(sale.date));

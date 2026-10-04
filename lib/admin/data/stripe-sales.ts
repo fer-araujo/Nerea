@@ -4,6 +4,7 @@ import { isCentavos } from "@/lib/admin/domain/money";
 import {
   costSnapshot,
   itemsSubtotal,
+  resolveLivemode,
   type SaleItem,
 } from "@/lib/admin/domain/sales";
 import { commerce } from "@/lib/commerce";
@@ -16,6 +17,7 @@ import { parseHandles } from "@/lib/commerce/stripe/metadata";
 import { readPieceCostTotals } from "./pieces";
 import { buildSaleDocument } from "./sale-document";
 import { COLLECTIONS, isAlreadyExistsError, isDocumentId } from "./shared";
+import { fetchStripeFees } from "./stripe-fees";
 
 // Recording a paid Stripe Checkout Session as a sale. Called ONLY by the
 // verified webhook (app/api/stripe/webhook/route.ts), after the signature
@@ -36,6 +38,12 @@ import { COLLECTIONS, isAlreadyExistsError, isDocumentId } from "./shared";
  */
 export interface StripeSaleSession {
   id?: string | null;
+  /**
+   * Whether Stripe made the session with the LIVE keys (`false` = test mode).
+   * Part of the signature-verified event; when it is missing the session id
+   * (`cs_test_…` / `cs_live_…`) says the same.
+   */
+  livemode?: boolean | null;
   /** Unix seconds. */
   created?: number | null;
   /** Centavos, before shipping. */
@@ -115,6 +123,16 @@ async function buildItems(
  * cost of goods is frozen from `pieces/{handle}` in the same transaction that
  * creates the sale; a piece with no cost recorded marks it `costPending`.
  *
+ * The sale also freezes Stripe's own fee and net for the payment, read from the
+ * session's balance transaction BEFORE the create (see stripe-fees.ts). When
+ * Stripe cannot give them yet (a balance transaction can lag the payment, or
+ * the call fails) the sale is STILL recorded, with `feePending: true`, and the
+ * panel offers "Actualizar comisión": a missing fee must never cost a paid sale
+ * or turn into a 500 that makes Stripe retry for nothing.
+ *
+ * It stores `livemode`, so a test-mode purchase, which lands in the same
+ * Firestore as production when testing locally, is kept apart from real sales.
+ *
  * Returns `unconfigured` before touching anything when Firebase isn't set up.
  * Any real failure (Firestore, or the catalog read it needs) REJECTS, and the
  * caller must treat that as "answer 500 so Stripe retries".
@@ -134,7 +152,13 @@ export async function recordStripeSale(
     return "skipped";
   }
 
-  const items = await buildItems(handles, session.metadata?.options);
+  // Independent reads, so they run together. `fetchStripeFees` never rejects:
+  // it answers `null` for a fee that is not available.
+  const [items, fees] = await Promise.all([
+    buildItems(handles, session.metadata?.options),
+    fetchStripeFees(sessionId),
+  ]);
+  const livemode = resolveLivemode(session.livemode, sessionId);
 
   const subtotal = asCentavos(session.amount_subtotal) ?? itemsSubtotal(items);
   const shipping = asCentavos(session.shipping_cost?.amount_total) ?? 0;
@@ -164,6 +188,10 @@ export async function recordStripeSale(
           costOfGoods,
           costPending,
           stripeSessionId: sessionId,
+          livemode,
+          ...(fees
+            ? { stripeFee: fees.fee, stripeNet: fees.net, feePending: false }
+            : { feePending: true }),
         }),
       );
     });

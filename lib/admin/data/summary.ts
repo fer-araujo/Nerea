@@ -2,10 +2,10 @@ import "server-only";
 import { Timestamp, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/admin/firebase/admin";
 import type { PeriodRange } from "@/lib/admin/domain/periods";
-import { SALE_STATUSES } from "@/lib/admin/domain/sales";
 import type { SummaryPurchase, SummarySale } from "@/lib/admin/domain/summary";
 import { readInBatches } from "./batched-read";
-import { COLLECTIONS, readCentavos, readEnum, toDate } from "./shared";
+import { SALE_FIGURE_FIELDS, readSaleFigures } from "./sale-figures";
+import { COLLECTIONS, readCentavos, toDate } from "./shared";
 
 // What the Resumen page reads from the ledgers: the sales and the purchases
 // inside ONE date window (see ledgerWindow in domain/summary.ts, which makes it
@@ -27,17 +27,11 @@ export const SUMMARY_SALES_LIMIT = 2000;
 /** Cap on purchases read for one dashboard (a year holds a few dozen). */
 export const SUMMARY_PURCHASES_LIMIT = 2000;
 
-// Only the fields the figures need. `date` is both read and ordered by, which
-// the batch cursor requires (see readInBatches).
-const SALE_FIELDS = [
-  "date",
-  "status",
-  "subtotal",
-  "shipping",
-  "total",
-  "costOfGoods",
-  "costPending",
-] as const;
+// Only the fields the figures need (a sale's are the ones readSaleFigures
+// reads: the totals, plus what tells a test-mode sale and a commission). `date`
+// is both read and ordered by, which the batch cursor requires (see
+// readInBatches).
+const SALE_FIELDS = ["date", ...SALE_FIGURE_FIELDS] as const;
 const PURCHASE_FIELDS = ["date", "totalCost"] as const;
 
 export interface SummaryLedger {
@@ -53,12 +47,9 @@ function toSummarySale(doc: QueryDocumentSnapshot): SummarySale {
   const data = doc.data();
   return {
     date: toDate(data.date),
-    status: readEnum(data.status, SALE_STATUSES, "active"),
-    subtotal: readCentavos(data.subtotal),
-    shipping: readCentavos(data.shipping),
-    total: readCentavos(data.total),
-    costOfGoods: readCentavos(data.costOfGoods),
-    costPending: data.costPending === true,
+    // The Ventas totals read a sale with this same function, so the dashboard
+    // and that page can never disagree about which sales count.
+    ...readSaleFigures(data),
   };
 }
 

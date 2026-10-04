@@ -7,12 +7,17 @@ import {
   successWithStoreWarning,
   type ActionResult,
 } from "@/lib/admin/action-result";
-import { recordManualSale, voidSale } from "@/lib/admin/data/sales";
+import {
+  recordManualSale,
+  refreshSaleFee,
+  voidSale,
+} from "@/lib/admin/data/sales";
 import { formText, formTexts } from "@/lib/admin/form-data";
 import { revalidateSalesViews } from "@/lib/admin/revalidate";
 import {
   firstIssueMessage,
   recordManualSaleSchema,
+  refreshSaleFeeSchema,
   voidSaleSchema,
 } from "@/lib/admin/schemas";
 import { markProductsSold } from "@/lib/commerce/sanity/mark-sold";
@@ -54,6 +59,7 @@ export async function recordManualSaleAction(
   const parsed = recordManualSaleSchema.safeParse({
     date: formText(formData, "date"),
     shipping: formText(formData, "shipping"),
+    terminalFee: formText(formData, "terminalFee"),
     note: formText(formData, "note"),
     // A checkbox posts its value when ticked and nothing at all when not.
     markSold: formText(formData, "markSold") === "on",
@@ -99,9 +105,10 @@ export async function recordManualSaleAction(
 }
 
 /**
- * "Anular venta": a manual sale stays on record with `status: "void"` and
- * leaves every total. It does not put the piece back on sale in the store —
- * that is a deliberate step in Studio.
+ * "Anular venta": a manual sale, or a Stripe sale made in test mode, stays on
+ * record with `status: "void"` and leaves every total (a live Stripe sale is
+ * refused: it is refunded in Stripe). It does not put the piece back on sale in
+ * the store — that is a deliberate step in Studio.
  */
 export async function voidSaleAction(
   formData: FormData,
@@ -120,6 +127,41 @@ export async function voidSaleAction(
 
   try {
     if (!(await voidSale(parsed.data.saleId, admin.uid))) {
+      return failure("unavailable");
+    }
+  } catch (error) {
+    return failureFromError(error);
+  }
+
+  revalidateSalesViews();
+  return { ok: true };
+}
+
+/**
+ * "Actualizar comisión": reads Stripe's fee and net for an online sale whose fee
+ * could not be read when the payment came in, and stores them on the sale. Same
+ * order as every admin action: authorize FIRST, validate the untrusted FormData,
+ * then the data layer. The only thing taken from the request is the sale's id:
+ * the Checkout Session id that Stripe is asked about comes from the stored sale.
+ * A fee Stripe can't give yet is a typed, retryable failure, never a crash.
+ */
+export async function refreshSaleFeeAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+
+  if (!(formData instanceof FormData)) {
+    return failure("invalid");
+  }
+  const parsed = refreshSaleFeeSchema.safeParse({
+    saleId: formText(formData, "saleId"),
+  });
+  if (!parsed.success) {
+    return failure("invalid", firstIssueMessage(parsed.error));
+  }
+
+  try {
+    if (!(await refreshSaleFee(parsed.data.saleId, admin.uid))) {
       return failure("unavailable");
     }
   } catch (error) {

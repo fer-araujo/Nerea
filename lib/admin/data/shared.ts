@@ -88,11 +88,20 @@ export function readNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-/** Integer centavos, or 0 for anything that isn't a safe non-negative integer. */
-export function readCentavos(value: unknown): number {
+/**
+ * Integer centavos, or `null` for anything that isn't a safe non-negative
+ * integer. For a field whose ABSENCE means something (a fee not read yet), so
+ * "never recorded" stays apart from a recorded 0.
+ */
+export function readOptionalCentavos(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
-    : 0;
+    : null;
+}
+
+/** Integer centavos, or 0 for anything that isn't a safe non-negative integer. */
+export function readCentavos(value: unknown): number {
+  return readOptionalCentavos(value) ?? 0;
 }
 
 /** Reads a field only when it is one of the allowed values. */

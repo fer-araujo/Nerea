@@ -25,6 +25,9 @@ function sale(overrides: Partial<SummarySale> = {}): SummarySale {
     total: 100_000,
     costOfGoods: 40_000,
     costPending: false,
+    livemode: true,
+    fee: 0,
+    feePending: false,
     ...overrides,
   };
 }
@@ -124,6 +127,95 @@ describe("periodKpis", () => {
     expect(kpis.grossProfit).toBe(0);
     expect(kpis.marginPercent).toBeNull();
     expect(kpis.cashFlow).toBe(-12_345);
+    expect(kpis.fees).toBe(0);
+    expect(kpis.profitAfterFees).toBe(0);
+  });
+
+  it("adds up the commissions and takes them off the gross profit: ventas - comisiones - costo", () => {
+    const kpis = periodKpis(
+      [
+        // An online sale: Stripe's fee with the IVA on it.
+        sale({ subtotal: 185_000, shipping: 15_000, total: 200_000, costOfGoods: 60_000, fee: 7_540 }),
+        // A manual sale: the terminal's commission.
+        sale({ subtotal: 90_000, total: 90_000, costOfGoods: 30_000, fee: 2_900 }),
+        // Cash: none.
+        sale({ subtotal: 50_000, total: 50_000, costOfGoods: 10_000 }),
+      ],
+      [],
+      THIS_MONTH,
+    );
+
+    expect(kpis.sales).toBe(325_000);
+    expect(kpis.fees).toBe(10_440);
+    expect(kpis.grossProfit).toBe(225_000);
+    // 325_000 - 10_440 - 100_000
+    expect(kpis.profitAfterFees).toBe(214_560);
+  });
+
+  it("can show a loss after commissions even when the gross profit is positive", () => {
+    const kpis = periodKpis(
+      [sale({ subtotal: 100_000, costOfGoods: 98_000, fee: 5_000 })],
+      [],
+      THIS_MONTH,
+    );
+
+    expect(kpis.grossProfit).toBe(2_000);
+    expect(kpis.profitAfterFees).toBe(-3_000);
+  });
+
+  it("leaves Stripe test-mode sales out of every figure, commissions included", () => {
+    const kpis = periodKpis(
+      [
+        sale({ subtotal: 100_000, costOfGoods: 40_000, fee: 3_000 }),
+        sale({
+          livemode: false,
+          subtotal: 900_000,
+          shipping: 90_000,
+          total: 990_000,
+          costOfGoods: 500_000,
+          costPending: true,
+          fee: 70_000,
+          feePending: true,
+        }),
+      ],
+      [],
+      THIS_MONTH,
+    );
+
+    expect(kpis.salesCount).toBe(1);
+    expect(kpis.sales).toBe(100_000);
+    expect(kpis.costOfGoods).toBe(40_000);
+    expect(kpis.grossProfit).toBe(60_000);
+    expect(kpis.fees).toBe(3_000);
+    expect(kpis.profitAfterFees).toBe(57_000);
+    // Nor does a test sale make a cost or a fee "pending".
+    expect(kpis.pendingCostCount).toBe(0);
+    expect(kpis.pendingFeeCount).toBe(0);
+  });
+
+  it("counts the online sales whose fee is still pending, adding nothing for them", () => {
+    const kpis = periodKpis(
+      [
+        sale({ fee: 0, feePending: true }),
+        sale({ fee: 0, feePending: true, status: "void" }),
+        sale({ fee: 4_000 }),
+      ],
+      [],
+      THIS_MONTH,
+    );
+
+    expect(kpis.pendingFeeCount).toBe(1);
+    expect(kpis.fees).toBe(4_000);
+  });
+
+  it("does not take commissions off the cash flow, which stays ventas - inversiones", () => {
+    const kpis = periodKpis(
+      [sale({ subtotal: 150_000, fee: 9_000 })],
+      [purchase({ totalCost: 30_000 })],
+      THIS_MONTH,
+    );
+
+    expect(kpis.cashFlow).toBe(120_000);
   });
 
   it("counts the sales whose cost was pending, as a data-quality hint", () => {
@@ -309,6 +401,23 @@ describe("monthlyBuckets", () => {
       sales: 150_000,
       costOfGoods: 50_000,
       grossProfit: 100_000,
+    });
+  });
+
+  it("leaves a Stripe test-mode sale out of the chart too", () => {
+    const buckets = monthlyBuckets(
+      [
+        sale({ subtotal: 100_000, costOfGoods: 40_000 }),
+        sale({ livemode: false, subtotal: 900_000, costOfGoods: 1_000 }),
+      ],
+      [],
+      NOW,
+    );
+
+    expect(buckets[11]).toMatchObject({
+      sales: 100_000,
+      costOfGoods: 40_000,
+      grossProfit: 60_000,
     });
   });
 

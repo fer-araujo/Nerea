@@ -32,6 +32,12 @@ export interface SummaryPurchase {
   date: Date | null;
   /** What the purchase cost in total, integer centavos. */
   totalCost: number;
+  /**
+   * The opening stock of a new material. It is worth something in the
+   * inventory, but it is not an investment of its period: left out of the
+   * Inversiones and Flujo figures.
+   */
+  initial?: boolean;
 }
 
 /** First-of-month civil dates of the chart, oldest first, current month last. */
@@ -113,7 +119,7 @@ export interface PeriodKpis {
   profitAfterFees: number;
   /** Counted Stripe sales whose fee was still unknown: they add 0 to `fees`. */
   pendingFeeCount: number;
-  /** Inversiones: what was spent on materials. */
+  /** Inversiones: what was spent on materials (opening stock excluded). */
   investments: number;
   purchaseCount: number;
   /** Flujo: sales - investments. Negative when more went out than came in. */
@@ -139,7 +145,7 @@ export function periodKpis(
   let investments = 0;
   let purchaseCount = 0;
   for (const purchase of purchases) {
-    if (within(range, purchase.date)) {
+    if (!purchase.initial && within(range, purchase.date)) {
       investments += purchase.totalCost;
       purchaseCount += 1;
     }
@@ -225,7 +231,7 @@ export function monthlyBuckets(
   }
 
   for (const purchase of purchases) {
-    if (purchase.date === null) {
+    if (purchase.initial || purchase.date === null) {
       continue;
     }
     const bucket = byKey.get(monthKeyOf(purchase.date));

@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import { FormNotice } from "@/components/admin/FormNotice";
+import { useModalClose } from "@/components/admin/Modal";
 import {
   FIELD_CLASS,
   INPUT_CLASS,
@@ -14,7 +15,7 @@ import {
 import { useAdminAction } from "@/components/admin/useAdminAction";
 import { cn } from "@/lib/cn";
 import { MAX_PURCHASE_ITEMS } from "@/lib/admin/domain/inventory";
-import { formatMXN, pesosToCentavos } from "@/lib/admin/domain/money";
+import { formatMXN, parsePesosText } from "@/lib/admin/domain/money";
 import type { MaterialUnit } from "@/lib/admin/domain/quantity";
 import { recordPurchaseAction } from "./actions";
 
@@ -32,17 +33,13 @@ interface Row {
   cost: string;
 }
 
-const OPENING_INVENTORY = "Inventario inicial";
-const MONEY_PATTERN = /^\d{1,8}(?:\.\d{1,2})?$/;
-
-function emptyRow(key: number): Row {
-  return { key, materialId: "", qty: "", cost: "" };
+function emptyRow(key: number, materialId = ""): Row {
+  return { key, materialId, qty: "", cost: "" };
 }
 
 /** What the live total counts: only a cost that is already a valid amount. */
 function costToCentavos(text: string): number {
-  const trimmed = text.trim();
-  return MONEY_PATTERN.test(trimmed) ? pesosToCentavos(Number(trimmed)) : 0;
+  return parsePesosText(text) ?? 0;
 }
 
 // Registers one purchase of one or more materials. A client island ONLY for
@@ -53,14 +50,18 @@ function costToCentavos(text: string): number {
 export function PurchaseForm({
   materials,
   today,
+  initialMaterialId,
 }: {
   materials: PurchaseMaterial[];
   /** `YYYY-MM-DD` in Mexico City, computed on the server. */
   today: string;
+  /** The material of the first row, when opened from that material's row. */
+  initialMaterialId?: string;
 }) {
   const { result, pending, submit } = useAdminAction(recordPurchaseAction);
+  const closeModal = useModalClose();
   const nextKey = useRef(1);
-  const [rows, setRows] = useState<Row[]>(() => [emptyRow(0)]);
+  const [rows, setRows] = useState<Row[]>(() => [emptyRow(0, initialMaterialId)]);
   const [date, setDate] = useState(today);
   const [supplier, setSupplier] = useState("");
   const [note, setNote] = useState("");
@@ -95,10 +96,11 @@ export function PurchaseForm({
 
     submit(event.currentTarget, () => {
       nextKey.current = 1;
-      setRows([emptyRow(0)]);
+      setRows([emptyRow(0, initialMaterialId)]);
       setDate(today);
       setSupplier("");
       setNote("");
+      closeModal();
     });
   }
 
@@ -109,9 +111,9 @@ export function PurchaseForm({
       className="flex flex-col gap-6"
     >
       <p className="max-w-prose text-sm leading-relaxed text-graphite">
-        ¿Cargas lo que ya tienes? Regístralo como una compra llamada «
-        {OPENING_INVENTORY}» con su costo, para que el inventario y el costo
-        promedio partan de un valor real.
+        Cada compra suma a las existencias y recalcula el costo promedio de cada
+        material. Para un material que aún no existe, créalo con «Nuevo
+        material» e indica lo que ya tienes.
       </p>
 
       <div className="grid gap-5 sm:grid-cols-2">
@@ -129,29 +131,19 @@ export function PurchaseForm({
           />
         </label>
 
-        <div className={FIELD_CLASS}>
-          <label className={FIELD_CLASS}>
-            <span className={LABEL_CLASS}>Proveedor o concepto</span>
-            <input
-              type="text"
-              name="supplier"
-              maxLength={120}
-              autoComplete="off"
-              value={supplier}
-              onChange={(event) => setSupplier(event.target.value)}
-              disabled={pending}
-              className={INPUT_CLASS}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={() => setSupplier(OPENING_INVENTORY)}
+        <label className={FIELD_CLASS}>
+          <span className={LABEL_CLASS}>Proveedor o concepto</span>
+          <input
+            type="text"
+            name="supplier"
+            maxLength={120}
+            autoComplete="off"
+            value={supplier}
+            onChange={(event) => setSupplier(event.target.value)}
             disabled={pending}
-            className={cn(QUIET_BUTTON_CLASS, "self-start")}
-          >
-            Usar «{OPENING_INVENTORY}»
-          </button>
-        </div>
+            className={INPUT_CLASS}
+          />
+        </label>
       </div>
 
       <ul className="flex flex-col gap-4">

@@ -2,10 +2,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 
-// The period tabs are one shared component (Resumen, Ventas, Inversiones) and
-// a scrolling row: this file pins that the row can never grow a vertical
-// scrollbar, and that the two pages which used to carry their own copy now
-// render the shared one. The AdminNav half of the same rule is in
+// The period tabs are one shared component (Resumen, Ventas, the Compras tab of
+// Inventario) and a scrolling row: this file pins that the row can never grow a
+// vertical scrollbar, and that the two pages which used to carry their own copy
+// now render the shared one. The AdminNav half of the same rule is in
 // tests/admin-nav.test.tsx; the Resumen page's use is in
 // tests/admin-summary-page.test.tsx.
 vi.mock("server-only", () => ({}));
@@ -40,6 +40,11 @@ vi.mock("@/lib/admin/data/purchases", () => ({
 const listMaterialsMock = vi.fn();
 vi.mock("@/lib/admin/data/materials", () => ({
   listMaterials: (...args: unknown[]) => listMaterialsMock(...args),
+  listMovements: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
 }));
 
 vi.mock("@/app/admin/(panel)/ventas/actions", () => ({
@@ -47,11 +52,14 @@ vi.mock("@/app/admin/(panel)/ventas/actions", () => ({
   voidSaleAction: vi.fn(),
   refreshSaleFeeAction: vi.fn(),
 }));
-vi.mock("@/app/admin/(panel)/inversiones/actions", () => ({
+vi.mock("@/app/admin/(panel)/inventario/actions", () => ({
+  createMaterialAction: vi.fn(),
+  adjustStockAction: vi.fn(),
+  correctStockAction: vi.fn(),
   recordPurchaseAction: vi.fn(),
 }));
 
-import AdminInvestmentsPage from "@/app/admin/(panel)/inversiones/page";
+import AdminInventoryPage from "@/app/admin/(panel)/inventario/page";
 import AdminSalesPage from "@/app/admin/(panel)/ventas/page";
 import { PeriodNav } from "@/components/admin/PeriodNav";
 import type { PeriodKey } from "@/lib/admin/domain/periods";
@@ -130,7 +138,7 @@ describe("PeriodNav", () => {
   });
 });
 
-describe("Ventas and Inversiones render the shared PeriodNav", () => {
+describe("Ventas and the Compras tab render the shared PeriodNav", () => {
   async function renderSales(search: Record<string, string> = {}) {
     listSalesMock.mockResolvedValue({ sales: [], hasNextPage: false });
     sumSalesMock.mockResolvedValue({
@@ -151,45 +159,67 @@ describe("Ventas and Inversiones render the shared PeriodNav", () => {
     return render(await AdminSalesPage({ searchParams: Promise.resolve(search) }));
   }
 
-  async function renderInvestments(search: Record<string, string> = {}) {
+  async function renderPurchases(search: Record<string, string> = {}) {
     listPurchasesMock.mockResolvedValue({ purchases: [], hasNextPage: false });
-    sumPurchasesMock.mockResolvedValue({ count: 0, totalCost: 0, truncated: false });
+    sumPurchasesMock.mockResolvedValue({
+      count: 0,
+      totalCost: 0,
+      initialCount: 0,
+      truncated: false,
+    });
     listMaterialsMock.mockResolvedValue([]);
-    return render(await AdminInvestmentsPage({ searchParams: Promise.resolve(search) }));
+    return render(
+      await AdminInventoryPage({
+        searchParams: Promise.resolve({ vista: "compras", ...search }),
+      }),
+    );
   }
 
-  it.each([
-    ["Ventas", renderSales],
-    ["Inversiones", renderInvestments],
-  ] as const)(
-    "%s: one period row, the shared one, with the no-vertical-overflow classes",
-    async (_name, renderPage) => {
+  // Each page's own address for a period, and the margin it gives the row.
+  const PAGES = [
+    {
+      name: "Ventas",
+      renderPage: renderSales,
+      hrefFor: (period?: string) => (period ? `/admin/ventas?period=${period}` : "/admin/ventas"),
+      margin: "mt-10",
+    },
+    {
+      name: "Inventario (Compras)",
+      renderPage: renderPurchases,
+      hrefFor: (period?: string) =>
+        period
+          ? `/admin/inventario?vista=compras&period=${period}`
+          : "/admin/inventario?vista=compras",
+      margin: "mt-8",
+    },
+  ] as const;
+
+  it.each(PAGES)(
+    "$name: one period row, the shared one, with the no-vertical-overflow classes",
+    async ({ renderPage, margin }) => {
       const view = await renderPage();
 
-      expect(view.container.querySelectorAll("nav")).toHaveLength(1);
+      expect(view.container.querySelectorAll('nav[aria-label="Periodo"]')).toHaveLength(1);
       expect(periodNav()).toHaveClass(...NO_VERTICAL_OVERFLOW, "-mb-px");
       // The shared component's wrapper: the hairline plus the page's top margin.
-      expect(periodNav().parentElement).toHaveClass("border-b", "border-line", "mt-10");
+      expect(periodNav().parentElement).toHaveClass("border-b", "border-line", margin);
     },
   );
 
-  it.each([
-    ["Ventas", renderSales, "/admin/ventas"],
-    ["Inversiones", renderInvestments, "/admin/inversiones"],
-  ] as const)(
-    "%s: keeps its period params (the default period has none) and marks the current tab",
-    async (_name, renderPage, path) => {
+  it.each(PAGES)(
+    "$name: keeps its period params (the default period has none) and marks the current tab",
+    async ({ renderPage, hrefFor: pageHref }) => {
       await renderPage({ period: "last-month" });
 
       const nav = within(periodNav());
-      expect(nav.getByRole("link", { name: "Este mes" })).toHaveAttribute("href", path);
+      expect(nav.getByRole("link", { name: "Este mes" })).toHaveAttribute("href", pageHref());
       expect(nav.getByRole("link", { name: "Mes anterior" })).toHaveAttribute(
         "href",
-        `${path}?period=last-month`,
+        pageHref("last-month"),
       );
       expect(nav.getByRole("link", { name: "Este año" })).toHaveAttribute(
         "href",
-        `${path}?period=this-year`,
+        pageHref("this-year"),
       );
       expect(nav.getByRole("link", { name: "Mes anterior" })).toHaveAttribute(
         "aria-current",
@@ -199,10 +229,7 @@ describe("Ventas and Inversiones render the shared PeriodNav", () => {
     },
   );
 
-  it.each([
-    ["Ventas", renderSales],
-    ["Inversiones", renderInvestments],
-  ] as const)("%s: falls back to this month for an unknown period", async (_name, renderPage) => {
+  it.each(PAGES)("$name: falls back to this month for an unknown period", async ({ renderPage }) => {
     await renderPage({ period: "forever" });
 
     expect(within(periodNav()).getByRole("link", { name: "Este mes" })).toHaveAttribute(

@@ -13,13 +13,13 @@ import {
 import { isCentavos, unitCostFromTotal } from "@/lib/admin/domain/money";
 import type { PeriodRange } from "@/lib/admin/domain/periods";
 import { pageOffset } from "@/lib/admin/pagination";
-import { appendAuditEntry } from "./audit-log";
 import {
   appendMovement,
   materialRef,
   toMaterial,
   type Material,
 } from "./materials";
+import { createPurchaseDocument } from "./purchase-doc";
 import {
   COLLECTIONS,
   isDocumentId,
@@ -72,6 +72,8 @@ export interface Purchase {
   note: string | null;
   items: PurchaseItem[];
   totalCost: number;
+  /** The opening stock of a material: not an investment of its period. */
+  initial: boolean;
 }
 
 export interface PurchasePage {
@@ -80,9 +82,16 @@ export interface PurchasePage {
 }
 
 export interface PurchaseTotal {
-  /** Sum of `totalCost` over the period, integer centavos. */
+  /**
+   * Sum of `totalCost` over the period, integer centavos. Opening-stock
+   * purchases (`initial`) are NOT in it: what she already owned was not spent
+   * in the period.
+   */
   totalCost: number;
+  /** Purchases that count (opening-stock ones excluded). */
   count: number;
+  /** Opening-stock purchases found in the period and left out of the above. */
+  initialCount: number;
   /** True when the period holds more than PURCHASE_SUM_LIMIT purchases. */
   truncated: boolean;
 }
@@ -185,20 +194,13 @@ export async function recordPurchase(
       });
     }
 
-    tx.create(purchaseRef, {
-      date: Timestamp.fromDate(input.date),
-      ...(input.supplier ? { supplier: input.supplier } : {}),
-      ...(input.note ? { note: input.note } : {}),
+    createPurchaseDocument(db, tx, purchaseRef, {
+      date: input.date,
+      supplier: input.supplier,
+      note: input.note,
       items,
       totalCost,
-      createdAt: FieldValue.serverTimestamp(),
       actor,
-    });
-    appendAuditEntry(db, tx, {
-      actor,
-      action: "purchase.record",
-      entity: "purchase",
-      entityId: purchaseRef.id,
     });
 
     return { id: purchaseRef.id };
@@ -232,6 +234,7 @@ function toPurchase(doc: DocumentSnapshot): Purchase {
       return item ? [item] : [];
     }),
     totalCost: readCentavos(data.totalCost),
+    initial: data.initial === true,
   };
 }
 
@@ -267,7 +270,8 @@ export async function listPurchases(
 /**
  * What was invested inside `range`: the sum of every purchase's total, in
  * integer centavos, computed here on the server over ALL of the period (not
- * just the visible page). Reads only the `totalCost` field.
+ * just the visible page). Opening-stock purchases (`initial`) are left out and
+ * only counted apart. Reads only the `totalCost` and `initial` fields.
  *
  * It sums the documents instead of using Firestore's `sum()` aggregation on
  * purpose: an aggregation over `totalCost` filtered by `date` needs a
@@ -286,17 +290,27 @@ export async function sumPurchases(
     .collection(COLLECTIONS.purchases)
     .where("date", ">=", Timestamp.fromDate(range.start))
     .where("date", "<", Timestamp.fromDate(range.end))
-    .select("totalCost")
+    .select("totalCost", "initial")
     .limit(PURCHASE_SUM_LIMIT + 1)
     .get();
 
-  const counted = snapshot.docs.slice(0, PURCHASE_SUM_LIMIT);
+  let totalCost = 0;
+  let count = 0;
+  let initialCount = 0;
+  for (const doc of snapshot.docs.slice(0, PURCHASE_SUM_LIMIT)) {
+    const data = doc.data();
+    if (data.initial === true) {
+      initialCount += 1;
+    } else {
+      totalCost += readCentavos(data.totalCost);
+      count += 1;
+    }
+  }
+
   return {
-    totalCost: counted.reduce(
-      (sum, doc) => sum + readCentavos(doc.data().totalCost),
-      0,
-    ),
-    count: counted.length,
+    totalCost,
+    count,
+    initialCount,
     truncated: snapshot.docs.length > PURCHASE_SUM_LIMIT,
   };
 }

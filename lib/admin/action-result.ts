@@ -46,6 +46,8 @@ const DEFAULT_MESSAGES: Readonly<Record<ActionErrorCode, string>> = {
   "insufficient-stock": "Las existencias no alcanzan para esta operación.",
   "material-not-found": "El material ya no existe. Recarga la página.",
   "invalid-material": "El material elegido no sirve para esta operación.",
+  "no-change":
+    "No hay nada que corregir: las existencias y el costo ya son esos.",
   "piece-not-found":
     "Una de las piezas ya no existe en el catálogo. Recarga la página.",
   "piece-unavailable":

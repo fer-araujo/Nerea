@@ -405,8 +405,9 @@ export default async function AdminSummaryPage({
           La utilidad bruta es lo que queda de tus ventas después de restar lo
           que costó hacer las piezas que vendiste. El flujo es lo que vendiste
           menos lo que invertiste en materiales en el mismo periodo, aunque ese
-          material siga en tu inventario. Las ventas son el precio de las
-          piezas, sin el envío.
+          material siga en tu inventario. El inventario inicial de un material
+          nuevo vale en el inventario, pero no cuenta como inversión. Las
+          ventas son el precio de las piezas, sin el envío.
         </p>
         <p className="mt-3 max-w-prose text-sm leading-relaxed text-graphite">
           La comisión es lo que cobra Stripe por cada pago más el IVA de esa

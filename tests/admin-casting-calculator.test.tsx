@@ -317,9 +317,9 @@ describe("CastingCalculator: registering a casting", () => {
       "href",
       "/admin/inventario",
     );
-    expect(screen.getByRole("link", { name: "Inversiones" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Compras" })).toHaveAttribute(
       "href",
-      "/admin/inversiones",
+      "/admin/inventario?vista=compras",
     );
   });
 

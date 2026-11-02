@@ -1,13 +1,10 @@
 import "server-only";
 import { revalidatePath } from "next/cache";
 
-// Materials feed all three modules (stock figures, the pickers, the history),
-// so any change to the ledger refreshes every page that reads it.
-const LEDGER_PATHS = [
-  "/admin/calculadora",
-  "/admin/inventario",
-  "/admin/inversiones",
-] as const;
+// Materials feed both modules (stock figures, the pickers, the history, the
+// purchases tab of Inventario), so any change to the ledger refreshes every page
+// that reads it. (/admin/inversiones is only a redirect now.)
+const LEDGER_PATHS = ["/admin/calculadora", "/admin/inventario"] as const;
 
 export function revalidateLedgerViews(): void {
   for (const path of LEDGER_PATHS) {

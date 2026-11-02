@@ -453,6 +453,7 @@ describe("listPurchases", () => {
       note: "Factura 12",
       items: [{ materialId: "m1", materialName: "Plata fina", qty: 1, totalCost: 9000 }],
       totalCost: 9000,
+      initial: false,
     });
     expect(page?.purchases[1]).toEqual({
       id: "odd",
@@ -461,6 +462,7 @@ describe("listPurchases", () => {
       note: null,
       items: [{ materialId: "", materialName: "", qty: 0, totalCost: 0 }],
       totalCost: 0,
+      initial: false,
     });
   });
 
@@ -494,18 +496,34 @@ describe("sumPurchases", () => {
     expect(total).toEqual({
       totalCost: (PURCHASES_PAGE_SIZE + 5) * 1000,
       count: PURCHASES_PAGE_SIZE + 5,
+      initialCount: 0,
       truncated: false,
     });
   });
 
-  it("reads only the totalCost field, with a range on date alone (no composite index)", async () => {
+  it("leaves opening-stock purchases out of the total and the count, reporting them apart", async () => {
+    seedPurchase("bought", new Date("2026-10-02T12:00:00Z"), 4000);
+    seedPurchase("opening", new Date("2026-10-03T12:00:00Z"), 100_000, { initial: true });
+    seedPurchase("opening2", new Date("2026-10-04T12:00:00Z"), 50_000, { initial: true });
+    // Only the literal `true` marks opening stock: a doubtful value counts.
+    seedPurchase("odd", new Date("2026-10-05T12:00:00Z"), 600, { initial: "yes" });
+
+    await expect(sumPurchases(OCTOBER)).resolves.toEqual({
+      totalCost: 4600,
+      count: 2,
+      initialCount: 2,
+      truncated: false,
+    });
+  });
+
+  it("reads only the totalCost and initial fields, with a range on date alone (no composite index)", async () => {
     seedPurchase("p1", new Date("2026-10-02T12:00:00Z"), 500, { supplier: "No me leas" });
 
     await sumPurchases(OCTOBER);
 
     expect(fake.queries[0]).toMatchObject({
       collection: "purchases",
-      select: ["totalCost"],
+      select: ["totalCost", "initial"],
       orderBys: [],
     });
     expect(fake.queries[0].wheres.every((where) => where.field === "date")).toBe(true);
@@ -515,6 +533,7 @@ describe("sumPurchases", () => {
     await expect(sumPurchases(OCTOBER)).resolves.toEqual({
       totalCost: 0,
       count: 0,
+      initialCount: 0,
       truncated: false,
     });
   });
@@ -542,5 +561,34 @@ describe("sumPurchases", () => {
     configured = false;
 
     await expect(sumPurchases(OCTOBER)).resolves.toBeNull();
+  });
+});
+
+describe("opening-stock purchases", () => {
+  const OCTOBER = periodRange("this-month", new Date("2026-10-15T12:00:00Z"));
+
+  it("listPurchases tells an opening-stock purchase from an ordinary one", async () => {
+    seedPurchase("opening", new Date("2026-10-03T12:00:00Z"), 100_000, { initial: true });
+    seedPurchase("bought", new Date("2026-10-02T12:00:00Z"), 4000);
+    seedPurchase("odd", new Date("2026-10-01T12:00:00Z"), 600, { initial: "yes" });
+
+    const page = await listPurchases(OCTOBER);
+
+    expect(page?.purchases.map((purchase) => [purchase.id, purchase.initial])).toEqual([
+      ["opening", true],
+      ["bought", false],
+      ["odd", false],
+    ]);
+  });
+
+  it("recordPurchase never writes the flag", async () => {
+    seedMaterial("m1");
+
+    const recorded = await recordPurchase(
+      { date: DATE, items: [{ materialId: "m1", qty: 1, totalCost: 100 }] },
+      ACTOR,
+    );
+
+    expect(fake.get(`purchases/${recorded?.id}`)).not.toHaveProperty("initial");
   });
 });

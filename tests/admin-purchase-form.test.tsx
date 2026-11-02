@@ -13,7 +13,7 @@ import {
 // action's own behavior (authorization first, zod validation, transactions)
 // is in tests/admin-inventory-actions.test.ts.
 const purchaseActionMock = vi.fn();
-vi.mock("@/app/admin/(panel)/inversiones/actions", () => ({
+vi.mock("@/app/admin/(panel)/inventario/actions", () => ({
   recordPurchaseAction: (...args: unknown[]) => purchaseActionMock(...args),
 }));
 
@@ -21,7 +21,7 @@ import { MAX_PURCHASE_ITEMS } from "@/lib/admin/domain/inventory";
 import {
   PurchaseForm,
   type PurchaseMaterial,
-} from "../app/admin/(panel)/inversiones/PurchaseForm";
+} from "../app/admin/(panel)/inventario/PurchaseForm";
 
 const TODAY = "2026-10-02";
 const MATERIALS: PurchaseMaterial[] = [
@@ -108,20 +108,27 @@ describe("PurchaseForm: item rows", () => {
     expect(group.getByText("Cantidad (pz)")).toBeInTheDocument();
   });
 
-  it("fills the supplier with «Inventario inicial» in one click", () => {
-    render(<PurchaseForm materials={MATERIALS} today={TODAY} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Usar «Inventario inicial»" }));
-
-    expect(screen.getByLabelText("Proveedor o concepto")).toHaveValue("Inventario inicial");
-  });
-
-  it("explains how to load the opening inventory", () => {
+  it("no longer offers an opening-inventory shortcut: that belongs to a new material", () => {
     render(<PurchaseForm materials={MATERIALS} today={TODAY} />);
 
     expect(
-      screen.getByText(/llamada «Inventario inicial» con su costo/),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /Inventario inicial/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/«Nuevo material»/)).toBeInTheDocument();
+  });
+
+  it("preselects the material of the row it was opened from, only in the first row", () => {
+    render(
+      <PurchaseForm materials={MATERIALS} today={TODAY} initialMaterialId="stones" />,
+    );
+    expect(
+      within(screen.getAllByRole("group")[0]).getByLabelText("Material"),
+    ).toHaveValue("stones");
+
+    fireEvent.click(addButton());
+    expect(
+      within(screen.getAllByRole("group")[1]).getByLabelText("Material"),
+    ).toHaveValue("");
   });
 });
 

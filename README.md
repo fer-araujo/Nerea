@@ -80,17 +80,30 @@ Sessions last 5 days (httpOnly, `SameSite=Strict` cookie scoped to `/admin`,
 revocation-checked on every request). Signing out revokes the user's Firebase
 refresh tokens, which ends the session on every device.
 
-### Calculadora, Inventario and Inversiones
+### Calculadora and Inventario
 
-Three more panel pages, all behind the same session check:
+Two more panel pages, all behind the same session check:
 
 - **Calculadora** — casting math (metal from wax weight, fine and alloy split,
   with the alloy table prefilled and editable). "Registrar vaciado" consumes the
   chosen fine-metal and alloy materials.
-- **Inventario** — materials with stock, average cost and per-material history.
-- **Inversiones** — purchases by period (this month / last month / this year,
-  in `America/Mexico_City` time) with the period total. To load what she already
-  has, register it as a purchase called **Inventario inicial** with its cost.
+- **Inventario** — one page, two tabs (`?vista=materiales|compras`), and every
+  form opens in an accessible modal (native `<dialog>`: Esc closes, focus returns
+  to the button that opened it). **Materiales** lists the materials with stock,
+  average cost and value; **Nuevo material** takes an optional opening quantity
+  and its total cost (recorded in the same transaction as an "Inventario inicial"
+  purchase, so stock and average start right); each row has **Registrar compra**,
+  **Ajustar** (a loss, or a physical count: a count that adds stock must state its
+  unit cost and re-weights the average; the form previews the result),
+  **Corregir** (sets the real stock and real average cost, with a reason and a
+  before/after view) and **Historial** (the movements, in a modal). **Compras**
+  lists the purchases by period (this month / last month / this year, in
+  `America/Mexico_City` time) with the period total.
+- Opening-stock purchases (`initial: true`) are worth something in the
+  inventory but are **not** investments: they are left out of the period total
+  here and of **Inversiones** and **Flujo** in the Resumen, and listed with an
+  "Inventario inicial" badge.
+- `/admin/inversiones` permanently redirects to `/admin/inventario?vista=compras`.
 
 Firestore collections (written only by the Admin SDK, inside transactions):
 `materials` (current stock and average cost) with an append-only `movements`
@@ -107,7 +120,7 @@ Two more pages behind the same session check:
   cost to make it, the margin and the margin %. A piece with no cost recorded
   shows **Costo pendiente**. "Calcular metal" fills the metal cost from grams ×
   the average cost per gram of a chosen inventory material.
-- **Ventas** — sales by period (same Mexico-time periods as Inversiones) with the
+- **Ventas** — sales by period (same Mexico-time periods as the Compras tab) with the
   totals: **Ventas** (the pieces' prices, shipping apart), **Costo de lo
   vendido** and **Utilidad bruta**. Online-shop sales appear on their own; **Registrar
   venta** adds one made outside the shop (price starts at the catalog's and can be

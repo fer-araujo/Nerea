@@ -456,9 +456,9 @@ export function CastingCalculator({
             <Link href="/admin/inventario" className={LINK_CLASS}>
               Inventario
             </Link>{" "}
-            y registra su compra en{" "}
-            <Link href="/admin/inversiones" className={LINK_CLASS}>
-              Inversiones
+            (indicando lo que ya tienes) o registra su compra en{" "}
+            <Link href="/admin/inventario?vista=compras" className={LINK_CLASS}>
+              Compras
             </Link>
             .
           </p>

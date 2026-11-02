@@ -33,6 +33,23 @@ export function hasValidPrecision(unit: MaterialUnit, value: number): boolean {
   return Math.abs(scaled - Math.round(scaled)) < 1e-6;
 }
 
+const UNSIGNED_QUANTITY_PATTERN = /^\d{1,9}(?:\.\d{1,2})?$/;
+const SIGNED_QUANTITY_PATTERN = /^-?\d{1,9}(?:\.\d{1,2})?$/;
+
+/**
+ * A quantity typed in a form (at most two decimals), or `null` when the text is
+ * not one. Mirrors the server schemas' rule, for previews only: "1e3", "0x10"
+ * and blanks are not numbers here, exactly as they are not there.
+ */
+export function parseQuantityText(
+  text: string,
+  { signed = false }: { signed?: boolean } = {},
+): number | null {
+  const trimmed = text.trim();
+  const pattern = signed ? SIGNED_QUANTITY_PATTERN : UNSIGNED_QUANTITY_PATTERN;
+  return pattern.test(trimmed) ? Number(trimmed) : null;
+}
+
 // Formatters are hoisted: constructing an Intl.NumberFormat is far more
 // expensive than calling format().
 const GRAMS_FORMAT = new Intl.NumberFormat("es-MX", {

@@ -35,12 +35,13 @@ export const MOVEMENT_TYPE_LABELS: Readonly<Record<MovementType, string>> = {
   casting: "Vaciado",
   adjustment: "Ajuste",
   loss: "Merma",
+  correction: "Corrección",
 };
 
 export const ADJUSTMENT_KIND_LABELS: Readonly<Record<AdjustmentKind, string>> =
   {
-    adjustment: "Corrección (suma o resta)",
-    loss: "Merma (solo resta)",
+    adjustment: "Conteo físico (suma o resta)",
+    loss: "Merma / pérdida (solo resta)",
   };
 
 export const SALE_SOURCE_LABELS: Readonly<Record<SaleSource, string>> = {

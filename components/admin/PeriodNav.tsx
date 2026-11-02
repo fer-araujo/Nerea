@@ -10,7 +10,7 @@ import {
 } from "./styles";
 
 // The period tabs (este mes / mes anterior / este año), shared by Resumen,
-// Ventas and Inversiones. The period lives in the URL (`?period=`, read back
+// Ventas and the Compras tab of Inventario. The period lives in the URL (`?period=`, read back
 // with parsePeriodKey), so a reload or a shared link keeps it. A Server
 // Component: `hrefFor` is called while the page renders on the server, so a
 // function prop is fine here.

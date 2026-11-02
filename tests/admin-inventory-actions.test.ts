@@ -37,14 +37,18 @@ vi.mock("@/lib/admin/firebase/admin", () => ({
 }));
 
 import { registerCastingAction } from "@/app/admin/(panel)/calculadora/actions";
-import { adjustStockAction, createMaterialAction } from "@/app/admin/(panel)/inventario/actions";
-import { recordPurchaseAction } from "@/app/admin/(panel)/inversiones/actions";
+import {
+  adjustStockAction,
+  correctStockAction,
+  createMaterialAction,
+  recordPurchaseAction,
+} from "@/app/admin/(panel)/inventario/actions";
 import { mexicoTodayIso } from "@/lib/admin/domain/periods";
 import { MAX_PURCHASE_ITEMS } from "@/lib/admin/domain/inventory";
 
 const ADMIN = { uid: "uid-admin-1", email: "admin@example.com" };
 const TODAY = mexicoTodayIso();
-const LEDGER_PATHS = ["/admin/calculadora", "/admin/inventario", "/admin/inversiones"];
+const LEDGER_PATHS = ["/admin/calculadora", "/admin/inventario"];
 
 function form(fields: Record<string, string | string[] | Blob>): FormData {
   const data = new FormData();
@@ -119,6 +123,12 @@ const ACTIONS: Array<{
     run: adjustStockAction,
     validForm: () =>
       form({ materialId: "m1", delta: "-1", kind: "adjustment", reason: "Conteo" }),
+  },
+  {
+    name: "correctStockAction",
+    run: correctStockAction,
+    validForm: () =>
+      form({ materialId: "m1", stock: "50", avgCost: "20", reason: "Conteo real" }),
   },
   {
     name: "recordPurchaseAction",
@@ -258,6 +268,115 @@ describe("createMaterialAction", () => {
     expect(result).toMatchObject({ ok: false, error: "invalid" });
     expect(getAdminDbMock).not.toHaveBeenCalled();
   });
+
+  it("starts empty, and writes no purchase, when the opening fields are blank", async () => {
+    await createMaterialAction(
+      form({ name: "Plata", kind: "fine_silver", unit: "g", initialQty: "", initialCost: "" }),
+    );
+
+    expect(fake.directChildren("materials")[0].data).toMatchObject({ stock: 0, avgCost: 0 });
+    expect(fake.directChildren("purchases")).toHaveLength(0);
+    expect(fake.opsMatching(MOVEMENT_PATH, "create")).toHaveLength(0);
+  });
+
+  describe("with an opening stock", () => {
+    const silver = {
+      name: "Plata fina",
+      kind: "fine_silver",
+      unit: "g",
+      initialQty: "30",
+      initialCost: "1000",
+    };
+
+    it("creates the material, its movement and an 'Inventario inicial' purchase in ONE transaction", async () => {
+      const result = await createMaterialAction(form(silver));
+
+      expect(result).toEqual({ ok: true });
+      // One transaction commits everything (material, movement, purchase and two
+      // audit entries): a failure can never leave a material without its
+      // purchase, or a purchase without its material.
+      expect(fake.transactionsRun).toBe(1);
+      expect(fake.committed).toHaveLength(5);
+
+      const material = fake.directChildren("materials")[0];
+      const materialId = material.path.split("/")[1];
+      expect(material.data).toMatchObject({ stock: 30, avgCost: 3333 });
+
+      const purchase = fake.directChildren("purchases")[0];
+      const purchaseId = purchase.path.split("/")[1];
+      expect(purchase.data).toMatchObject({
+        supplier: "Inventario inicial",
+        initial: true,
+        totalCost: 100_000,
+        actor: ADMIN.uid,
+        items: [
+          { materialId, materialName: "Plata fina", qty: 30, totalCost: 100_000 },
+        ],
+      });
+
+      const movement = dataOf(fake.opsMatching(MOVEMENT_PATH, "create")[0]);
+      expect(movement).toMatchObject({
+        type: "purchase",
+        qty: 30,
+        unitCost: 3333,
+        totalCost: 100_000,
+        refId: purchaseId,
+      });
+
+      const actions = fake.directChildren("auditLog").map((entry) => entry.data.action);
+      expect(actions.sort()).toEqual(["material.create", "purchase.record"]);
+    });
+
+    it("accepts a free opening stock (cost 0)", async () => {
+      await expect(createMaterialAction(form({ ...silver, initialCost: "0" }))).resolves.toEqual({
+        ok: true,
+      });
+
+      expect(fake.directChildren("materials")[0].data).toMatchObject({ stock: 30, avgCost: 0 });
+    });
+
+    it("treats a quantity of 0 as no opening stock", async () => {
+      await createMaterialAction(form({ ...silver, initialQty: "0", initialCost: "" }));
+
+      expect(fake.directChildren("materials")[0].data).toMatchObject({ stock: 0, avgCost: 0 });
+      expect(fake.directChildren("purchases")).toHaveLength(0);
+    });
+
+    it.each([
+      ["a quantity without its cost", { initialCost: "" }, "Costo total"],
+      ["a cost without a quantity", { initialQty: "" }, "Cantidad inicial"],
+      ["a negative quantity", { initialQty: "-3" }, "Cantidad inicial"],
+      ["three decimals", { initialQty: "1.234" }, "Cantidad inicial"],
+      ["a cost with three decimals", { initialCost: "10.123" }, "Costo total"],
+      ["a negative cost", { initialCost: "-1" }, "Costo total"],
+    ])("rejects %s before the database", async (_label, patch, label) => {
+      const result = await createMaterialAction(form({ ...silver, ...patch }));
+
+      expect(result).toMatchObject({ ok: false, error: "invalid" });
+      expect((result as { message: string }).message).toContain(label);
+      expect(getAdminDbMock).not.toHaveBeenCalled();
+      expect(fake.committed).toHaveLength(0);
+    });
+
+    it("answers a typed failure, writing nothing, for fractional pieces", async () => {
+      const result = await createMaterialAction(
+        form({ ...silver, kind: "stone", unit: "pz", initialQty: "2.5" }),
+      );
+
+      expect(result).toMatchObject({ ok: false, error: "invalid-quantity" });
+      expect(fake.committed).toHaveLength(0);
+    });
+
+    it("writes nothing at all when the transaction fails", async () => {
+      vi.spyOn(fake, "runTransaction").mockRejectedValue(new Error("boom"));
+
+      await expect(createMaterialAction(form(silver))).resolves.toMatchObject({
+        ok: false,
+        error: "failed",
+      });
+      expect(fake.committed).toHaveLength(0);
+    });
+  });
 });
 
 describe("adjustStockAction", () => {
@@ -277,6 +396,83 @@ describe("adjustStockAction", () => {
       note: "Conteo físico",
       actor: ADMIN.uid,
     });
+  });
+
+  describe("adding stock (a physical count above the ledger)", () => {
+    const count = { ...base, delta: "10", reason: "Conteo físico" };
+
+    it("is REFUSED without a unit cost, so units can never enter the ledger for free", async () => {
+      seedShelf();
+
+      const result = await adjustStockAction(form(count));
+
+      expect(result).toMatchObject({ ok: false, error: "invalid" });
+      expect((result as { message: string }).message).toContain("Costo por unidad");
+      expect((result as { message: string }).message).toContain("Registrar compra");
+      expect(getAdminDbMock).not.toHaveBeenCalled();
+      expect(fake.committed).toHaveLength(0);
+    });
+
+    it("re-weights the average with the stated cost and records it on the movement", async () => {
+      seedShelf();
+
+      const result = await adjustStockAction(form({ ...count, unitCost: "25" }));
+
+      // (100 x 1500 + 10 x 2500) / 110 = 1590.9 -> 1591
+      expect(result).toEqual({ ok: true });
+      expect(fake.get("materials/m1")).toMatchObject({ stock: 110, avgCost: 1591 });
+      expect(dataOf(fake.opsMatching(MOVEMENT_PATH, "create")[0])).toMatchObject({
+        type: "adjustment",
+        qty: 10,
+        unitCost: 2500,
+        totalCost: 25_000,
+      });
+    });
+
+    it("accepts a cost of 0 when it is stated, and averages it in", async () => {
+      seedShelf();
+
+      await adjustStockAction(form({ ...count, unitCost: "0" }));
+
+      // (100 x 1500) / 110 = 1363.6 -> 1364
+      expect(fake.get("materials/m1")).toMatchObject({ stock: 110, avgCost: 1364 });
+    });
+
+    it("rejects a malformed unit cost", async () => {
+      seedShelf();
+
+      for (const unitCost of ["abc", "-1", "1.234", "1e3"]) {
+        const result = await adjustStockAction(form({ ...count, unitCost }));
+        expect(result).toMatchObject({ ok: false, error: "invalid" });
+      }
+      expect(getAdminDbMock).not.toHaveBeenCalled();
+    });
+
+    it("ignores a unit cost on a removal: the average does not move", async () => {
+      seedShelf();
+
+      await adjustStockAction(form({ ...base, delta: "-5", unitCost: "999" }));
+
+      expect(fake.get("materials/m1")).toMatchObject({ stock: 95, avgCost: 1500 });
+    });
+  });
+
+  it("the Plata story: a free +30 g can no longer be typed, and the honest way lands on the right average", async () => {
+    // The old flow: create Plata, "adjust" +30 g for free, then register the same
+    // 30 g as a purchase for $1,000 -> 60 g at $16.67/g instead of 30 g at $33.33/g.
+    await createMaterialAction(form({ name: "Plata", kind: "fine_silver", unit: "g" }));
+    const plata = fake.directChildren("materials")[0].path.split("/")[1];
+
+    const free = await adjustStockAction(
+      form({ materialId: plata, delta: "30", kind: "adjustment", reason: "Conteo inicial" }),
+    );
+    expect(free).toMatchObject({ ok: false, error: "invalid" });
+    expect(fake.get(`materials/${plata}`)).toMatchObject({ stock: 0, avgCost: 0 });
+
+    await recordPurchaseAction(
+      form({ date: TODAY, itemMaterialId: plata, itemQty: "30", itemCost: "1000" }),
+    );
+    expect(fake.get(`materials/${plata}`)).toMatchObject({ stock: 30, avgCost: 3333 });
   });
 
   it("accepts a loss that removes stock", async () => {
@@ -343,6 +539,121 @@ describe("adjustStockAction", () => {
   });
 });
 
+describe("correctStockAction", () => {
+  const base = { materialId: "plata", stock: "30", avgCost: "33.33", reason: "Error al capturar" };
+
+  // The state the Plata bug left behind: 60 g at $16.67/g.
+  function seedBuggyPlata() {
+    seedMaterial("plata", { name: "Plata", stock: 60, avgCost: 1667 });
+  }
+
+  it("sets the REAL stock and the REAL average: 30 g at 3333 centavos/g from 60 g at 1667", async () => {
+    seedBuggyPlata();
+
+    const result = await correctStockAction(form(base));
+
+    expect(result).toEqual({ ok: true });
+    expect(fake.get("materials/plata")).toMatchObject({ stock: 30, avgCost: 3333 });
+  });
+
+  it("writes ONE 'correction' movement, with the signed change and the new unit cost, and the reason", async () => {
+    seedBuggyPlata();
+
+    await correctStockAction(form({ ...base, reason: "  Error al capturar  " }));
+
+    const movements = fake.opsMatching(MOVEMENT_PATH, "create");
+    expect(movements).toHaveLength(1);
+    expect(dataOf(movements[0])).toMatchObject({
+      type: "correction",
+      qty: -30,
+      unitCost: 3333,
+      totalCost: 99_990,
+      note: "Error al capturar",
+      actor: ADMIN.uid,
+    });
+  });
+
+  it("is one transaction with an audit entry that holds no values", async () => {
+    seedBuggyPlata();
+
+    await correctStockAction(form(base));
+
+    expect(fake.transactionsRun).toBe(1);
+    // The material, its movement and the audit entry, committed together.
+    expect(fake.committed).toHaveLength(3);
+    const audit = fake.directChildren("auditLog")[0].data;
+    expect(audit).toEqual(
+      expect.objectContaining({
+        actor: ADMIN.uid,
+        action: "stock.correct",
+        entity: "material",
+        entityId: "plata",
+      }),
+    );
+    expect(Object.keys(audit).sort()).toEqual(["action", "actor", "at", "entity", "entityId"]);
+  });
+
+  it("can raise stock and change only the cost", async () => {
+    seedBuggyPlata();
+
+    await correctStockAction(form({ ...base, stock: "60", avgCost: "40" }));
+    expect(fake.get("materials/plata")).toMatchObject({ stock: 60, avgCost: 4000 });
+    expect(dataOf(fake.opsMatching(MOVEMENT_PATH, "create")[0])).toMatchObject({ qty: 0 });
+
+    await correctStockAction(form({ ...base, stock: "75.5", avgCost: "40" }));
+    expect(fake.get("materials/plata")).toMatchObject({ stock: 75.5, avgCost: 4000 });
+  });
+
+  it("allows zero stock", async () => {
+    seedBuggyPlata();
+
+    await expect(correctStockAction(form({ ...base, stock: "0" }))).resolves.toEqual({ ok: true });
+    expect(fake.get("materials/plata")).toMatchObject({ stock: 0, avgCost: 3333 });
+  });
+
+  it("refuses a correction that changes nothing", async () => {
+    seedBuggyPlata();
+
+    const result = await correctStockAction(form({ ...base, stock: "60", avgCost: "16.67" }));
+
+    expect(result).toMatchObject({ ok: false, error: "no-change" });
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it.each([
+    ["a negative stock", { stock: "-1" }, "Existencias"],
+    ["a blank stock", { stock: "" }, "Existencias"],
+    ["three decimals of stock", { stock: "1.234" }, "Existencias"],
+    ["a blank average cost", { avgCost: "" }, "Costo promedio"],
+    ["a negative average cost", { avgCost: "-5" }, "Costo promedio"],
+    ["three decimals of cost", { avgCost: "1.234" }, "Costo promedio"],
+    ["no reason", { reason: "" }, "Motivo"],
+    ["a reason that is too short", { reason: "ab" }, "Motivo"],
+    ["a material id that tries to address another path", { materialId: "a/b" }, "Material"],
+  ])("rejects %s before the database", async (_label, patch, label) => {
+    seedBuggyPlata();
+
+    const result = await correctStockAction(form({ ...base, ...patch }));
+
+    expect(result).toMatchObject({ ok: false, error: "invalid" });
+    expect((result as { message: string }).message).toContain(label);
+    expect(getAdminDbMock).not.toHaveBeenCalled();
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("answers typed failures for an unknown material and for fractional pieces", async () => {
+    await expect(
+      correctStockAction(form({ ...base, materialId: "ghost" })),
+    ).resolves.toMatchObject({ ok: false, error: "material-not-found" });
+
+    seedMaterial("stones", { kind: "stone", unit: "pz", stock: 10, avgCost: 500 });
+    await expect(
+      correctStockAction(form({ ...base, materialId: "stones", stock: "2.5" })),
+    ).resolves.toMatchObject({ ok: false, error: "invalid-quantity" });
+    expect(fake.committed).toHaveLength(0);
+  });
+});
+
 describe("recordPurchaseAction", () => {
   const line = { itemMaterialId: "m1", itemQty: "5", itemCost: "90.00" };
   const base = { date: TODAY, ...line };
@@ -379,14 +690,16 @@ describe("recordPurchaseAction", () => {
     });
   });
 
-  it("records the opening inventory as a purchase called 'Inventario inicial'", async () => {
+  it("never flags a purchase as opening stock: only a new material can do that", async () => {
     seedMaterial("m1", { stock: 0, avgCost: 0 });
 
     await expect(
-      recordPurchaseAction(form({ ...base, supplier: "Inventario inicial" })),
+      recordPurchaseAction(form({ ...base, supplier: "Inventario inicial", initial: "true" })),
     ).resolves.toEqual({ ok: true });
 
-    expect(fake.directChildren("purchases")[0].data.supplier).toBe("Inventario inicial");
+    const receipt = fake.directChildren("purchases")[0].data;
+    expect(receipt.supplier).toBe("Inventario inicial");
+    expect(receipt).not.toHaveProperty("initial");
     expect(fake.get("materials/m1")).toMatchObject({ stock: 5, avgCost: 1800 });
   });
 

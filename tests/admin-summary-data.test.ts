@@ -217,7 +217,7 @@ describe("readSummaryLedger", () => {
     // Never the items or a note.
     expect(salesQuery?.select).not.toContain("items");
     expect(salesQuery?.select).not.toContain("note");
-    expect(purchasesQuery?.select).toEqual(["date", "totalCost"]);
+    expect(purchasesQuery?.select).toEqual(["date", "totalCost", "initial"]);
   });
 
   it("reads in batches of 500 with a cursor, losing nothing even when many sales share one date", async () => {
@@ -391,5 +391,21 @@ describe("readInBatches", () => {
   it("is an empty, complete read for an empty collection", async () => {
     expect(await read(5, 2)).toEqual({ rows: [], truncated: false });
     expect(fake.queries).toHaveLength(1);
+  });
+});
+
+describe("readSummaryLedger: opening stock", () => {
+  it("marks an opening-stock purchase, and only the literal true counts", async () => {
+    seedPurchase("opening", { initial: true, totalCost: 500_000 });
+    seedPurchase("odd", { initial: "yes" });
+    seedPurchase("plain");
+
+    const ledger = await readSummaryLedger(WINDOW);
+
+    expect(ledger?.purchases.map((purchase) => purchase.initial).sort()).toEqual([
+      false,
+      false,
+      true,
+    ]);
   });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AUDIT_PATH,
   FakeFirestore,
@@ -32,6 +32,7 @@ import {
   MATERIALS_LIMIT,
   MOVEMENTS_PAGE_SIZE,
   adjustStock,
+  correctStock,
   createMaterial,
   listMaterials,
   listMovements,
@@ -65,6 +66,10 @@ async function codeOf(promise: Promise<unknown>): Promise<string | undefined> {
 beforeEach(() => {
   fake = new FakeFirestore();
   configured = true;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("createMaterial", () => {
@@ -182,12 +187,18 @@ describe("adjustStock", () => {
     });
   });
 
-  it("adds stock with a positive correction", async () => {
+  it("adds stock with a positive count that states its cost", async () => {
     seedMaterial("m1", { stock: 10 });
 
     await expect(
       adjustStock(
-        { materialId: "m1", delta: 4.25, kind: "adjustment", reason: "Faltaba contar" },
+        {
+          materialId: "m1",
+          delta: 4.25,
+          kind: "adjustment",
+          unitCost: 1500,
+          reason: "Faltaba contar",
+        },
         ACTOR,
       ),
     ).resolves.toEqual({ stock: 14.25 });
@@ -521,5 +532,282 @@ describe("listMaterials", () => {
     configured = false;
 
     await expect(listMaterials()).resolves.toBeNull();
+  });
+});
+
+describe("adjustStock: a positive count must carry its cost", () => {
+  const count = {
+    materialId: "m1",
+    delta: 30,
+    kind: "adjustment" as const,
+    reason: "Conteo físico",
+  };
+
+  it("refuses to add stock without a unit cost, writing nothing", async () => {
+    seedMaterial("m1", { stock: 0, avgCost: 0 });
+
+    await expect(codeOf(adjustStock(count, ACTOR))).resolves.toBe("invalid-cost");
+
+    expect(fake.committed).toHaveLength(0);
+    expect(fake.get("materials/m1")).toMatchObject({ stock: 0, avgCost: 0 });
+  });
+
+  it("refuses an invalid unit cost", async () => {
+    seedMaterial("m1");
+
+    for (const unitCost of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(codeOf(adjustStock({ ...count, unitCost }, ACTOR))).resolves.toBe(
+        "invalid-cost",
+      );
+    }
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("re-weights the average with weightedAverageCost and prices the movement at the stated cost", async () => {
+    seedMaterial("m1", { stock: 30, avgCost: 3333 });
+
+    await adjustStock({ ...count, delta: 30, unitCost: 1000 }, ACTOR);
+
+    // (30 x 3333 + 30 x 1000) / 60 = 2166.5 -> 2167 (half up)
+    expect(fake.get("materials/m1")).toMatchObject({ stock: 60, avgCost: 2167 });
+    const update = fake.opsMatching(MATERIAL_PATH, "update")[0];
+    expect(update.kind === "delete" ? null : Object.keys(update.data).sort()).toEqual([
+      "avgCost",
+      "stock",
+      "updatedAt",
+    ]);
+    const movement = fake.opsMatching(MOVEMENT_PATH, "create")[0];
+    expect(movement.kind === "delete" ? null : movement.data).toMatchObject({
+      type: "adjustment",
+      qty: 30,
+      unitCost: 1000,
+      totalCost: 30_000,
+    });
+  });
+
+  it("at the current average, adding units leaves the average where it was", async () => {
+    seedMaterial("m1", { stock: 100, avgCost: 1500 });
+
+    await adjustStock({ ...count, delta: 10, unitCost: 1500 }, ACTOR);
+
+    expect(fake.get("materials/m1")).toMatchObject({ stock: 110, avgCost: 1500 });
+  });
+
+  it("starts the average from the stated cost when nothing was on hand", async () => {
+    seedMaterial("m1", { stock: 0, avgCost: 0 });
+
+    await adjustStock({ ...count, delta: 30, unitCost: 3333 }, ACTOR);
+
+    expect(fake.get("materials/m1")).toMatchObject({ stock: 30, avgCost: 3333 });
+  });
+
+  it("never moves the average on a removal, and ignores a cost sent with it", async () => {
+    seedMaterial("m1", { stock: 100, avgCost: 1500 });
+
+    await adjustStock({ ...count, delta: -10, unitCost: 99_999 }, ACTOR);
+
+    expect(fake.get("materials/m1")).toMatchObject({ stock: 90, avgCost: 1500 });
+    const movement = fake.opsMatching(MOVEMENT_PATH, "create")[0];
+    expect(movement.kind === "delete" ? null : movement.data).toMatchObject({
+      unitCost: 1500,
+      totalCost: 15_000,
+    });
+  });
+
+  it("the Plata story: adjusting +30 g at no stated cost can no longer double the stock", async () => {
+    seedMaterial("m1", { stock: 0, avgCost: 0 });
+
+    // The old path: a free +30 g...
+    await expect(codeOf(adjustStock(count, ACTOR))).resolves.toBe("invalid-cost");
+    expect(fake.get("materials/m1")).toMatchObject({ stock: 0, avgCost: 0 });
+  });
+});
+
+describe("correctStock", () => {
+  // The state the Plata bug left: 60 g at $16.67/g instead of 30 g at $33.33/g.
+  function seedBuggyPlata() {
+    seedMaterial("plata", { name: "Plata", stock: 60, avgCost: 1667 });
+  }
+  const fix = { materialId: "plata", stock: 30, avgCost: 3333, reason: "Error al capturar" };
+
+  it("sets 30 g at 3333 centavos/g from the 60 g at 1667 state", async () => {
+    seedBuggyPlata();
+
+    await expect(correctStock(fix, ACTOR)).resolves.toEqual({ stock: 30, avgCost: 3333 });
+
+    expect(fake.get("materials/plata")).toMatchObject({ stock: 30, avgCost: 3333 });
+    expect(fake.get("materials/plata")).toHaveProperty("updatedAt");
+  });
+
+  it("appends one 'correction' movement with the signed change, the new unit cost and the reason", async () => {
+    seedBuggyPlata();
+
+    await correctStock(fix, ACTOR);
+
+    const movements = fake.opsMatching(MOVEMENT_PATH);
+    expect(movements).toHaveLength(1);
+    expect(movements[0].kind === "delete" ? null : movements[0].data).toEqual({
+      type: "correction",
+      qty: -30,
+      unitCost: 3333,
+      totalCost: 99_990,
+      note: "Error al capturar",
+      createdAt: SERVER_TIMESTAMP,
+      actor: ACTOR,
+    });
+  });
+
+  it("does it all in ONE transaction, with an audit entry that holds no values", async () => {
+    seedBuggyPlata();
+
+    await correctStock({ ...fix, reason: "Motivo secreto" }, ACTOR);
+
+    expect(fake.transactionsRun).toBe(1);
+    const audit = fake.opsMatching(AUDIT_PATH, "create")[0];
+    expect(audit.kind === "delete" ? null : audit.data).toEqual({
+      actor: ACTOR,
+      action: "stock.correct",
+      entity: "material",
+      entityId: "plata",
+      at: SERVER_TIMESTAMP,
+    });
+    expect(JSON.stringify(audit)).not.toContain("secreto");
+  });
+
+  it("writes nothing when the correction would change nothing", async () => {
+    seedBuggyPlata();
+
+    await expect(
+      codeOf(correctStock({ ...fix, stock: 60, avgCost: 1667 }, ACTOR)),
+    ).resolves.toBe("no-change");
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("refuses an invalid stock or cost, writing nothing", async () => {
+    seedBuggyPlata();
+
+    await expect(codeOf(correctStock({ ...fix, stock: -1 }, ACTOR))).resolves.toBe(
+      "invalid-quantity",
+    );
+    await expect(codeOf(correctStock({ ...fix, stock: 1.005 }, ACTOR))).resolves.toBe(
+      "invalid-quantity",
+    );
+    await expect(codeOf(correctStock({ ...fix, avgCost: -1 }, ACTOR))).resolves.toBe(
+      "invalid-cost",
+    );
+    await expect(codeOf(correctStock({ ...fix, avgCost: 1.5 }, ACTOR))).resolves.toBe(
+      "invalid-cost",
+    );
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("refuses an unknown material and a malformed id", async () => {
+    await expect(codeOf(correctStock({ ...fix, materialId: "ghost" }, ACTOR))).resolves.toBe(
+      "material-not-found",
+    );
+    await expect(codeOf(correctStock({ ...fix, materialId: "a/b/c" }, ACTOR))).resolves.toBe(
+      "material-not-found",
+    );
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("returns null when Firebase is not configured", async () => {
+    configured = false;
+
+    await expect(correctStock(fix, ACTOR)).resolves.toBeNull();
+  });
+});
+
+describe("createMaterial with an opening stock", () => {
+  const silver = {
+    name: "Plata fina",
+    kind: "fine_silver" as const,
+    unit: "g" as const,
+    initial: { qty: 30, totalCost: 100_000 },
+  };
+
+  it("writes the material, the purchase movement, the 'initial' purchase and two audit entries in ONE transaction", async () => {
+    // 2026-10-02 12:00 in Mexico City: the purchase is dated that day.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-02T18:00:00Z"));
+
+    const created = await createMaterial(silver, ACTOR);
+
+    expect(fake.transactionsRun).toBe(1);
+    expect(fake.committed).toHaveLength(5);
+
+    expect(fake.get(`materials/${created?.id}`)).toMatchObject({ stock: 30, avgCost: 3333 });
+
+    const [purchasePath] = fake.committed
+      .filter((op) => op.path.startsWith("purchases/"))
+      .map((op) => op.path);
+    const purchaseId = purchasePath.split("/")[1];
+    expect(fake.get(purchasePath)).toEqual({
+      date: new FakeTimestamp(new Date("2026-10-02T06:00:00Z")),
+      supplier: "Inventario inicial",
+      initial: true,
+      items: [
+        { materialId: created?.id, materialName: "Plata fina", qty: 30, totalCost: 100_000 },
+      ],
+      totalCost: 100_000,
+      // The server's timestamp, resolved when the transaction committed.
+      createdAt: expect.any(FakeTimestamp),
+      actor: ACTOR,
+    });
+
+    const movement = fake.opsMatching(MOVEMENT_PATH, "create")[0];
+    expect(movement.kind === "delete" ? null : movement.data).toMatchObject({
+      type: "purchase",
+      qty: 30,
+      unitCost: 3333,
+      totalCost: 100_000,
+      refId: purchaseId,
+    });
+  });
+
+  it("is atomic: if the transaction fails, neither the material nor the purchase exists", async () => {
+    vi.spyOn(fake, "runTransaction").mockRejectedValueOnce(new Error("unavailable"));
+
+    await expect(createMaterial(silver, ACTOR)).rejects.toThrow("unavailable");
+
+    expect(fake.directChildren("materials")).toHaveLength(0);
+    expect(fake.directChildren("purchases")).toHaveLength(0);
+  });
+
+  it("refuses a quantity that does not fit the unit, or a bad cost, before the database", async () => {
+    await expect(
+      codeOf(createMaterial({ ...silver, unit: "pz", initial: { qty: 2.5, totalCost: 100 } }, ACTOR)),
+    ).resolves.toBe("invalid-quantity");
+    await expect(
+      codeOf(createMaterial({ ...silver, initial: { qty: 30, totalCost: -1 } }, ACTOR)),
+    ).resolves.toBe("invalid-cost");
+    await expect(
+      codeOf(createMaterial({ ...silver, initial: { qty: 0, totalCost: 100 } }, ACTOR)),
+    ).resolves.toBe("invalid-quantity");
+
+    expect(fake.transactionsRun).toBe(0);
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("returns null when Firebase is not configured", async () => {
+    configured = false;
+
+    await expect(createMaterial(silver, ACTOR)).resolves.toBeNull();
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("keeps the audit log free of values: no name, quantity or cost", async () => {
+    await createMaterial({ ...silver, name: "Secreto" }, ACTOR);
+
+    for (const audit of fake.opsMatching(AUDIT_PATH, "create")) {
+      expect(JSON.stringify(audit)).not.toContain("Secreto");
+      expect(audit.kind === "delete" ? [] : Object.keys(audit.data).sort()).toEqual([
+        "action",
+        "actor",
+        "at",
+        "entity",
+        "entityId",
+      ]);
+    }
   });
 });

@@ -25,7 +25,6 @@ describe("AdminNav", () => {
       ["Resumen", "/admin"],
       ["Calculadora", "/admin/calculadora"],
       ["Inventario", "/admin/inventario"],
-      ["Inversiones", "/admin/inversiones"],
       ["Piezas", "/admin/piezas"],
       ["Ventas", "/admin/ventas"],
       ["Mensajes", "/admin/mensajes"],
@@ -43,7 +42,6 @@ describe("AdminNav", () => {
     ["/admin/calculadora", "Calculadora"],
     ["/admin/inventario", "Inventario"],
     ["/admin/inventario/anything", "Inventario"],
-    ["/admin/inversiones", "Inversiones"],
     ["/admin/piezas", "Piezas"],
     ["/admin/piezas/anything", "Piezas"],
     ["/admin/ventas", "Ventas"],
@@ -59,7 +57,23 @@ describe("AdminNav", () => {
     expect(current.map((link) => link.textContent)).toEqual([label]);
   });
 
-  it("scrolls horizontally instead of wrapping, so seven tabs stay one line at 360px", () => {
+  it("has no Inversiones tab: purchases live inside Inventario now", () => {
+    render(<AdminNav />);
+
+    expect(screen.queryByRole("link", { name: "Inversiones" })).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("link").some((link) => link.getAttribute("href") === "/admin/inversiones"),
+    ).toBe(false);
+  });
+
+  it("keeps Inventario current on its purchases view, which is the same page with a query", () => {
+    pathnameMock.mockReturnValue("/admin/inventario");
+    render(<AdminNav />);
+
+    expect(screen.getByRole("link", { name: "Inventario" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("scrolls horizontally instead of wrapping, so six tabs stay one line at 360px", () => {
     render(<AdminNav />);
 
     expect(screen.getByRole("navigation", { name: "Secciones del panel" })).toHaveClass(

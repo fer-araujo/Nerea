@@ -584,3 +584,53 @@ describe("countPieces", () => {
     expect(countPieces([])).toEqual({ available: 0, sold: 0 });
   });
 });
+
+describe("opening-stock purchases", () => {
+  const opening = purchase({ totalCost: 500_000, initial: true });
+
+  it("stay out of Inversiones, the purchase count and Flujo", () => {
+    const kpis = periodKpis(
+      [sale({ subtotal: 100_000, total: 100_000, costOfGoods: 40_000 })],
+      [purchase({ totalCost: 30_000 }), opening],
+      THIS_MONTH,
+    );
+
+    expect(kpis.investments).toBe(30_000);
+    expect(kpis.purchaseCount).toBe(1);
+    // Flujo = ventas - inversiones: the opening stock was not spent this month.
+    expect(kpis.cashFlow).toBe(70_000);
+  });
+
+  it("alone, leave Inversiones at zero and Flujo equal to the sales", () => {
+    const kpis = periodKpis(
+      [sale({ subtotal: 100_000, total: 100_000 })],
+      [opening],
+      THIS_MONTH,
+    );
+
+    expect(kpis.investments).toBe(0);
+    expect(kpis.purchaseCount).toBe(0);
+    expect(kpis.cashFlow).toBe(100_000);
+  });
+
+  it("stay out of the monthly bars too, so the chart and the cards agree", () => {
+    const buckets = monthlyBuckets(
+      [],
+      [purchase({ totalCost: 30_000 }), opening],
+      NOW,
+    );
+
+    expect(buckets.find((bucket) => bucket.key === "2026-10")?.investments).toBe(30_000);
+  });
+
+  it("an ordinary purchase (no flag, or flag false) always counts", () => {
+    const kpis = periodKpis(
+      [],
+      [purchase({ totalCost: 1_000 }), purchase({ totalCost: 2_000, initial: false })],
+      THIS_MONTH,
+    );
+
+    expect(kpis.investments).toBe(3_000);
+    expect(kpis.purchaseCount).toBe(2);
+  });
+});

@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // A layout's redirect does NOT stop its page: Next renders a layout and the
 // pages under it in parallel, so a page that reads data has to authorize
-// itself. These tests pin that for the module pages (Calculadora, Inventario,
-// Inversiones, Piezas, Ventas) exactly like tests/admin-page-guards.test.ts
-// does for Mensajes: requireAdmin() redirects (it THROWS, like Next's real
-// redirect) and the data layer must never be queried.
+// itself. These tests pin that for the module pages (Calculadora, Inventario in
+// both its views, the old Inversiones redirect, Piezas, Ventas) exactly like
+// tests/admin-page-guards.test.ts does for Mensajes: requireAdmin() redirects
+// (it THROWS, like Next's real redirect) and the data layer must never be
+// queried.
 vi.mock("server-only", () => ({}));
 
 const requireAdminMock = vi.fn();
@@ -56,9 +57,16 @@ vi.mock("@/app/admin/(panel)/calculadora/actions", () => ({
 vi.mock("@/app/admin/(panel)/inventario/actions", () => ({
   createMaterialAction: vi.fn(),
   adjustStockAction: vi.fn(),
-}));
-vi.mock("@/app/admin/(panel)/inversiones/actions", () => ({
+  correctStockAction: vi.fn(),
   recordPurchaseAction: vi.fn(),
+}));
+
+// Next's redirects THROW to stop the render; the mock does the same, with the
+// target in the message.
+const permanentRedirectMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  permanentRedirect: (...args: unknown[]) => permanentRedirectMock(...args),
+  useRouter: () => ({ replace: vi.fn() }),
 }));
 vi.mock("@/app/admin/(panel)/piezas/actions", () => ({
   savePieceCostAction: vi.fn(),
@@ -76,7 +84,7 @@ vi.mock("@/components/admin/AdminShell", () => ({
 import AdminPanelLayout from "@/app/admin/(panel)/layout";
 import AdminCalculatorPage from "@/app/admin/(panel)/calculadora/page";
 import AdminInventoryPage from "@/app/admin/(panel)/inventario/page";
-import AdminInvestmentsPage from "@/app/admin/(panel)/inversiones/page";
+import AdminInvestmentsRedirect from "@/app/admin/(panel)/inversiones/page";
 import AdminPiecesPage from "@/app/admin/(panel)/piezas/page";
 import AdminSalesPage from "@/app/admin/(panel)/ventas/page";
 
@@ -117,8 +125,9 @@ const PAGES: Array<{
     reads: () => [listMaterialsMock, listMovementsMock],
   },
   {
-    name: "Inversiones",
-    render: () => AdminInvestmentsPage({ searchParams: Promise.resolve({}) }),
+    name: "Inventario (Compras)",
+    render: () =>
+      AdminInventoryPage({ searchParams: Promise.resolve({ vista: "compras" }) }),
     reads: () => [listPurchasesMock, sumPurchasesMock, listMaterialsMock],
   },
   {
@@ -151,6 +160,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   // Default: NOT an admin — requireAdmin() redirects (throws).
   requireAdminMock.mockRejectedValue(new Error(REDIRECT));
+  permanentRedirectMock.mockImplementation((url: string) => {
+    throw new Error(`NEXT_REDIRECT ${url}`);
+  });
   listMaterialsMock.mockResolvedValue([]);
   listMovementsMock.mockResolvedValue({ movements: [], hasNextPage: false });
   listPurchasesMock.mockResolvedValue({ purchases: [], hasNextPage: false });
@@ -244,9 +256,89 @@ describe("Inventario page: search params", () => {
     expect(listMaterialsMock).toHaveBeenCalledTimes(1);
     expect(listMovementsMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["no view", {}],
+    ["the materials view", { vista: "materiales" }],
+    ["an unknown view", { vista: "inversiones" }],
+    ["an empty view", { vista: "" }],
+    ["a prototype key", { vista: "__proto__" }],
+  ])("shows the materials for %s, without reading any purchase", async (_label, search) => {
+    await AdminInventoryPage({ searchParams: Promise.resolve(search) });
+
+    expect(listMaterialsMock).toHaveBeenCalledTimes(1);
+    expect(listPurchasesMock).not.toHaveBeenCalled();
+    expect(sumPurchasesMock).not.toHaveBeenCalled();
+  });
+
+  it("reads purchases, and no movements, on the purchases view even if a material is selected", async () => {
+    await AdminInventoryPage({
+      searchParams: Promise.resolve({ vista: "compras", material: "m1" }),
+    });
+
+    expect(listPurchasesMock).toHaveBeenCalledTimes(1);
+    expect(listMovementsMock).not.toHaveBeenCalled();
+  });
 });
 
-describe("Inversiones page: period and page params", () => {
+describe("Inversiones route: a permanent redirect into Inventario", () => {
+  const TARGET = "/admin/inventario?vista=compras";
+
+  it("sends a signed-out visitor to the login first, never revealing the redirect or reading data", async () => {
+    await expect(
+      AdminInvestmentsRedirect({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow(REDIRECT);
+
+    expect(requireAdminMock).toHaveBeenCalledTimes(1);
+    expect(permanentRedirectMock).not.toHaveBeenCalled();
+    expectNoDataAccess();
+  });
+
+  it("redirects an admin permanently to the Compras tab", async () => {
+    requireAdminMock.mockResolvedValue(ADMIN);
+
+    await expect(
+      AdminInvestmentsRedirect({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow(`NEXT_REDIRECT ${TARGET}`);
+
+    expect(permanentRedirectMock).toHaveBeenCalledWith(TARGET);
+    expect(requireAdminMock.mock.invocationCallOrder[0]).toBeLessThan(
+      permanentRedirectMock.mock.invocationCallOrder[0],
+    );
+    expectNoDataAccess();
+  });
+
+  it("carries over the period and page that were asked for", async () => {
+    requireAdminMock.mockResolvedValue(ADMIN);
+
+    await expect(
+      AdminInvestmentsRedirect({
+        searchParams: Promise.resolve({ period: "last-month", page: "3" }),
+      }),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(permanentRedirectMock).toHaveBeenCalledWith(
+      `${TARGET}&period=last-month&page=3`,
+    );
+  });
+
+  it.each([
+    ["an unknown period", { period: "forever" }],
+    ["a prototype key", { period: "__proto__" }],
+    ["a bad page", { page: "-2" }],
+    ["an injected URL", { period: "//evil.example", page: "https://evil.example" }],
+  ])("drops %s instead of forwarding it", async (_label, search) => {
+    requireAdminMock.mockResolvedValue(ADMIN);
+
+    await expect(
+      AdminInvestmentsRedirect({ searchParams: Promise.resolve(search) }),
+    ).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(permanentRedirectMock).toHaveBeenCalledWith(TARGET);
+  });
+});
+
+describe("Inventario (Compras): period and page params", () => {
   beforeEach(() => {
     requireAdminMock.mockResolvedValue(ADMIN);
     // 2026-10-02 12:00 in Mexico City.
@@ -255,7 +347,7 @@ describe("Inversiones page: period and page params", () => {
   });
 
   it("defaults to this month, in Mexico time, and totals the same range it lists", async () => {
-    await AdminInvestmentsPage({ searchParams: Promise.resolve({}) });
+    await AdminInventoryPage({ searchParams: Promise.resolve({ vista: "compras" }) });
 
     const [range, page] = listPurchasesMock.mock.calls[0];
     expect((range as { start: Date }).start.toISOString()).toBe("2026-10-01T06:00:00.000Z");
@@ -265,16 +357,16 @@ describe("Inversiones page: period and page params", () => {
   });
 
   it("honours last month and this year and the page number", async () => {
-    await AdminInvestmentsPage({
-      searchParams: Promise.resolve({ period: "last-month", page: "2" }),
+    await AdminInventoryPage({
+      searchParams: Promise.resolve({ vista: "compras", period: "last-month", page: "2" }),
     });
     const [lastMonth, page] = listPurchasesMock.mock.calls[0];
     expect((lastMonth as { start: Date }).start.toISOString()).toBe("2026-09-01T06:00:00.000Z");
     expect(page).toBe(2);
 
     listPurchasesMock.mockClear();
-    await AdminInvestmentsPage({
-      searchParams: Promise.resolve({ period: "this-year" }),
+    await AdminInventoryPage({
+      searchParams: Promise.resolve({ vista: "compras", period: "this-year" }),
     });
     const [thisYear] = listPurchasesMock.mock.calls[0];
     expect((thisYear as { start: Date }).start.toISOString()).toBe("2026-01-01T06:00:00.000Z");
@@ -284,7 +376,7 @@ describe("Inversiones page: period and page params", () => {
   it.each(["forever", "", "__proto__"])(
     "falls back to this month for the unknown period %j",
     async (period) => {
-      await AdminInvestmentsPage({ searchParams: Promise.resolve({ period }) });
+      await AdminInventoryPage({ searchParams: Promise.resolve({ vista: "compras", period }) });
 
       const [range] = listPurchasesMock.mock.calls[0];
       expect((range as { start: Date }).start.toISOString()).toBe("2026-10-01T06:00:00.000Z");
@@ -294,7 +386,7 @@ describe("Inversiones page: period and page params", () => {
   it.each(["0", "-2", "abc", "1.5"])(
     "falls back to the first page for the page %j",
     async (page) => {
-      await AdminInvestmentsPage({ searchParams: Promise.resolve({ page }) });
+      await AdminInventoryPage({ searchParams: Promise.resolve({ vista: "compras", page }) });
 
       expect(listPurchasesMock.mock.calls[0][1]).toBe(1);
     },

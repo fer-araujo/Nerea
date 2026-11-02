@@ -9,6 +9,7 @@ import { COLLECTIONS } from "./shared";
 export type AuditAction =
   | "material.create"
   | "stock.adjust"
+  | "stock.correct"
   | "purchase.record"
   | "casting.record"
   | "piece.update"

@@ -17,7 +17,6 @@ const NAV_ITEMS = [
   { href: "/admin", label: "Resumen", exact: true },
   { href: "/admin/calculadora", label: "Calculadora", exact: false },
   { href: "/admin/inventario", label: "Inventario", exact: false },
-  { href: "/admin/inversiones", label: "Inversiones", exact: false },
   { href: "/admin/piezas", label: "Piezas", exact: false },
   { href: "/admin/ventas", label: "Ventas", exact: false },
   { href: "/admin/mensajes", label: "Mensajes", exact: false },

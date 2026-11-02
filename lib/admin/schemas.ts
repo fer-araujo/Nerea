@@ -158,12 +158,51 @@ function optionalText(label: string, max: number) {
 
 // ---- inventario --------------------------------------------------------
 
-export const createMaterialSchema = z.object({
-  name: requiredText("Nombre", { max: 80 }),
-  kind: z.enum(MATERIAL_KINDS, { error: "Tipo: elige una opción." }),
-  unit: z.enum(MATERIAL_UNITS, { error: "Unidad: elige una opción." }),
-});
+// "Nuevo material". The opening stock is optional: a blank quantity (or 0)
+// means the material starts empty. A quantity above 0 REQUIRES its total cost
+// (0 is a valid cost: a gift), so the stock never enters the ledger unpriced.
+export const createMaterialSchema = z
+  .object({
+    name: requiredText("Nombre", { max: 80 }),
+    kind: z.enum(MATERIAL_KINDS, { error: "Tipo: elige una opción." }),
+    unit: z.enum(MATERIAL_UNITS, { error: "Unidad: elige una opción." }),
+    initialQty: z.preprocess(
+      blankAsMissing,
+      nonNegativeDecimal("Cantidad inicial", { maxDecimals: 2, max: 1_000_000 }).optional(),
+    ),
+    initialCost: optionalMoneyText("Costo total", { max: 10_000_000 }),
+  })
+  .superRefine((value, context) => {
+    const hasStock = value.initialQty !== undefined && value.initialQty > 0;
+    if (hasStock && value.initialCost === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["initialCost"],
+        message:
+          "Costo total: escribe cuánto costó lo que ya tienes (puede ser 0).",
+      });
+    }
+    if (!hasStock && value.initialCost !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["initialQty"],
+        message:
+          "Cantidad inicial: escribe cuánto tienes, o deja el costo en blanco.",
+      });
+    }
+  })
+  .transform(({ name, kind, unit, initialQty, initialCost }) => ({
+    name,
+    kind,
+    unit,
+    ...(initialQty !== undefined && initialQty > 0 && initialCost !== undefined
+      ? { initial: { qty: initialQty, totalCost: initialCost } }
+      : {}),
+  }));
 
+// "Ajustar". A "loss" is negative only. A physical count may add or remove, and
+// ADDING needs the cost of what was added: it re-weights the average like a
+// purchase would, and without it the units would enter the ledger for free.
 export const adjustStockSchema = z
   .object({
     materialId: documentId("Material"),
@@ -175,14 +214,37 @@ export const adjustStockSchema = z
         error: "Cantidad: el valor es demasiado grande.",
       }),
     kind: z.enum(ADJUSTMENT_KINDS, { error: "Tipo: elige una opción." }),
+    unitCost: optionalMoneyText("Costo por unidad", { max: 10_000_000 }),
     reason: requiredText("Motivo", { min: 3, max: 200 }),
   })
   .refine((value) => value.kind !== "loss" || value.delta < 0, {
     path: ["delta"],
     error: "Cantidad: una merma debe ser negativa.",
-  });
+  })
+  .refine((value) => value.delta < 0 || value.unitCost !== undefined, {
+    path: ["unitCost"],
+    error:
+      "Costo por unidad: es obligatorio al sumar existencias (puede ser 0). ¿Compraste material? Usa Registrar compra.",
+  })
+  // A cost only means something for units that come in.
+  .transform(({ unitCost, ...rest }) => ({
+    ...rest,
+    ...(rest.delta > 0 && unitCost !== undefined ? { unitCost } : {}),
+  }));
 
-// ---- inversiones -------------------------------------------------------
+// "Corregir": the real stock and the real average cost per unit. Zero stock is
+// allowed; the reason is what the history shows.
+export const correctStockSchema = z.object({
+  materialId: documentId("Material"),
+  stock: nonNegativeDecimal("Existencias reales", {
+    maxDecimals: 2,
+    max: 1_000_000,
+  }),
+  avgCost: moneyText("Costo promedio por unidad", { max: 10_000_000 }),
+  reason: requiredText("Motivo", { min: 3, max: 200 }),
+});
+
+// ---- compras -----------------------------------------------------------
 
 const purchaseItemSchema = z.object({
   materialId: documentId("Material"),

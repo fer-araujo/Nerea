@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   InventoryError,
+  applyAdjustment,
   consumeStock,
   fineKindFor,
   moveStock,
   movementValue,
+  planCorrection,
   receiveStock,
   type StockState,
 } from "@/lib/admin/domain/inventory";
@@ -155,5 +157,151 @@ describe("InventoryError", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe("InventoryError");
     expect(error.code).toBe("insufficient-stock");
+  });
+});
+
+describe("applyAdjustment", () => {
+  const onHand: StockState = { stock: 30, avgCost: 3333 };
+
+  it("refuses to add stock without a unit cost: units never enter the ledger for free", () => {
+    expect(codeOf(() => applyAdjustment(onHand, "g", "adjustment", 30))).toBe("invalid-cost");
+    expect(codeOf(() => applyAdjustment(EMPTY, "g", "adjustment", 30))).toBe("invalid-cost");
+  });
+
+  it("refuses an invalid unit cost", () => {
+    for (const unitCost of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(codeOf(() => applyAdjustment(onHand, "g", "adjustment", 5, unitCost))).toBe(
+        "invalid-cost",
+      );
+    }
+  });
+
+  it("prices a positive count like a purchase of those units and re-weights the average", () => {
+    // (30 x 3333 + 30 x 1000) / 60 = 2166.5 -> 2167
+    expect(applyAdjustment(onHand, "g", "adjustment", 30, 1000)).toEqual({
+      stock: 60,
+      avgCost: 2167,
+    });
+    // Exactly what receiveStock does for the same units and the same total.
+    expect(applyAdjustment(onHand, "g", "adjustment", 30, 1000)).toEqual(
+      receiveStock(onHand, "g", 30, movementValue(1000, 30)),
+    );
+  });
+
+  it("starts from the stated cost when nothing was on hand", () => {
+    expect(applyAdjustment(EMPTY, "g", "adjustment", 30, 3333)).toEqual({
+      stock: 30,
+      avgCost: 3333,
+    });
+  });
+
+  it("keeps the average when the units come in at the cost they already carry", () => {
+    expect(applyAdjustment(onHand, "g", "adjustment", 10, 3333)).toEqual({
+      stock: 40,
+      avgCost: 3333,
+    });
+  });
+
+  it("accepts a cost of 0 when it is stated", () => {
+    // (30 x 3333) / 40 = 2499.75 -> 2500
+    expect(applyAdjustment(onHand, "g", "adjustment", 10, 0)).toEqual({
+      stock: 40,
+      avgCost: 2500,
+    });
+  });
+
+  it("removes stock without ever touching the average, and needs no cost", () => {
+    expect(applyAdjustment(onHand, "g", "adjustment", -5)).toEqual({ stock: 25, avgCost: 3333 });
+    expect(applyAdjustment(onHand, "g", "loss", -5.5)).toEqual({ stock: 24.5, avgCost: 3333 });
+    // A cost sent with a removal is not used.
+    expect(applyAdjustment(onHand, "g", "adjustment", -5, 99_999)).toEqual({
+      stock: 25,
+      avgCost: 3333,
+    });
+  });
+
+  it("refuses a loss that is not negative", () => {
+    expect(codeOf(() => applyAdjustment(onHand, "g", "loss", 5, 100))).toBe("invalid-quantity");
+    expect(codeOf(() => applyAdjustment(onHand, "g", "loss", 0))).toBe("invalid-quantity");
+  });
+
+  it("still refuses to go below zero, a zero quantity and the wrong precision", () => {
+    expect(codeOf(() => applyAdjustment(onHand, "g", "adjustment", -30.01))).toBe(
+      "insufficient-stock",
+    );
+    expect(codeOf(() => applyAdjustment(onHand, "g", "adjustment", 0, 100))).toBe(
+      "invalid-quantity",
+    );
+    expect(codeOf(() => applyAdjustment(onHand, "pz", "adjustment", 1.5, 100))).toBe(
+      "invalid-quantity",
+    );
+    expect(codeOf(() => applyAdjustment(onHand, "g", "adjustment", Number.NaN, 100))).toBe(
+      "invalid-quantity",
+    );
+  });
+});
+
+describe("planCorrection", () => {
+  // The state the Plata bug left behind.
+  const buggy: StockState = { stock: 60, avgCost: 1667 };
+
+  it("brings 60 g at 1667 to 30 g at 3333, with the signed change", () => {
+    expect(planCorrection(buggy, "g", { stock: 30, avgCost: 3333 })).toEqual({
+      stock: 30,
+      avgCost: 3333,
+      delta: -30,
+    });
+  });
+
+  it("can raise the stock, or change only the cost", () => {
+    expect(planCorrection(buggy, "g", { stock: 75.5, avgCost: 1667 })).toMatchObject({
+      stock: 75.5,
+      delta: 15.5,
+    });
+    expect(planCorrection(buggy, "g", { stock: 60, avgCost: 4000 })).toEqual({
+      stock: 60,
+      avgCost: 4000,
+      delta: 0,
+    });
+  });
+
+  it("allows zero stock", () => {
+    expect(planCorrection(buggy, "g", { stock: 0, avgCost: 1667 })).toMatchObject({
+      stock: 0,
+      delta: -60,
+    });
+  });
+
+  it("is exact on hundredths", () => {
+    expect(planCorrection({ stock: 0.3, avgCost: 100 }, "g", { stock: 0.1, avgCost: 100 })).toMatchObject({
+      delta: -0.2,
+    });
+  });
+
+  it("refuses a correction that changes nothing", () => {
+    expect(codeOf(() => planCorrection(buggy, "g", { stock: 60, avgCost: 1667 }))).toBe(
+      "no-change",
+    );
+  });
+
+  it("refuses a negative or wrongly-precise stock and an invalid cost", () => {
+    expect(codeOf(() => planCorrection(buggy, "g", { stock: -1, avgCost: 1667 }))).toBe(
+      "invalid-quantity",
+    );
+    expect(codeOf(() => planCorrection(buggy, "g", { stock: 1.005, avgCost: 1667 }))).toBe(
+      "invalid-quantity",
+    );
+    expect(codeOf(() => planCorrection(buggy, "pz", { stock: 2.5, avgCost: 1667 }))).toBe(
+      "invalid-quantity",
+    );
+    expect(codeOf(() => planCorrection(buggy, "g", { stock: Number.NaN, avgCost: 1667 }))).toBe(
+      "invalid-quantity",
+    );
+    expect(codeOf(() => planCorrection(buggy, "g", { stock: 30, avgCost: -1 }))).toBe(
+      "invalid-cost",
+    );
+    expect(codeOf(() => planCorrection(buggy, "g", { stock: 30, avgCost: 33.5 }))).toBe(
+      "invalid-cost",
+    );
   });
 });

@@ -32,7 +32,7 @@ export const SUMMARY_PURCHASES_LIMIT = 2000;
 // is both read and ordered by, which the batch cursor requires (see
 // readInBatches).
 const SALE_FIELDS = ["date", ...SALE_FIGURE_FIELDS] as const;
-const PURCHASE_FIELDS = ["date", "totalCost"] as const;
+const PURCHASE_FIELDS = ["date", "totalCost", "initial"] as const;
 
 export interface SummaryLedger {
   sales: SummarySale[];
@@ -58,6 +58,7 @@ function toSummaryPurchase(doc: QueryDocumentSnapshot): SummaryPurchase {
   return {
     date: toDate(data.date),
     totalCost: readCentavos(data.totalCost),
+    initial: data.initial === true,
   };
 }
 

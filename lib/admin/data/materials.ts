@@ -8,18 +8,25 @@ import {
 } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/admin/firebase/admin";
 import {
+  INITIAL_PURCHASE_CONCEPT,
   InventoryError,
   MATERIAL_KINDS,
   MOVEMENT_TYPES,
-  moveStock,
+  applyAdjustment,
   movementValue,
+  planCorrection,
+  receiveStock,
   type AdjustmentKind,
   type MaterialKind,
   type MovementType,
+  type StockState,
 } from "@/lib/admin/domain/inventory";
+import { unitCostFromTotal } from "@/lib/admin/domain/money";
+import { mexicoDateToInstant, mexicoTodayIso } from "@/lib/admin/domain/periods";
 import { MATERIAL_UNITS, type MaterialUnit } from "@/lib/admin/domain/quantity";
 import { pageOffset } from "@/lib/admin/pagination";
 import { appendAuditEntry } from "./audit-log";
+import { createPurchaseDocument } from "./purchase-doc";
 import {
   COLLECTIONS,
   isDocumentId,
@@ -34,14 +41,17 @@ import {
 // The materials ledger: `materials/{id}` holds the CURRENT stock and average
 // cost; `materials/{id}/movements/{id}` is the append-only history behind it.
 //
-// Two rules hold for every function here and in purchases.ts / castings.ts:
+// Three rules hold for every function here and in purchases.ts / castings.ts:
 //   - stock and avgCost change ONLY inside a Firestore transaction (read the
 //     material, apply a pure rule from lib/admin/domain/inventory, write the
 //     result and its movement together), so two overlapping requests can't
 //     lose an update or drive stock below zero;
 //   - movements are only ever CREATED (appendMovement below is the single
 //     writer) — never updated or deleted. A mistake is corrected by a new,
-//     reasoned adjustment, so the ledger can always be audited.
+//     reasoned adjustment or correction, so the ledger can always be audited;
+//   - the average cost changes in exactly three places: a purchase (including a
+//     new material's opening stock), a positive count that states its unit cost,
+//     and a correction. A loss or a negative count never moves it.
 //
 // Contract, as in contact-messages.ts: "Firebase not configured" is an
 // expected state, reported as `null`; a broken ledger rule rejects with an
@@ -159,18 +169,39 @@ export interface NewMaterialInput {
   name: string;
   kind: MaterialKind;
   unit: MaterialUnit;
+  /**
+   * What she already has of it, with what it cost in total (integer centavos,
+   * 0 allowed). Recorded as an opening-stock purchase in the SAME transaction,
+   * so the stock and the average cost start right.
+   */
+  initial?: { qty: number; totalCost: number };
 }
 
+const EMPTY_STOCK: StockState = { stock: 0, avgCost: 0 };
+
 /**
- * Creates a material with nothing on hand. Stock only ever arrives through a
- * purchase (opening inventory is registered as one), so a new material starts
- * at 0 and cannot be created with a made-up balance. Returns `null` when
- * Firebase isn't configured.
+ * Creates a material. With nothing on hand it starts at 0; with an `initial`
+ * quantity and cost it starts with that stock at that cost, and ONE transaction
+ * writes the material, the "purchase" movement and a purchase document flagged
+ * `initial` (concept "Inventario inicial"), so the history explains the
+ * balance and the opening stock never counts as an investment of the period.
+ * Rejects with an InventoryError when the quantity doesn't fit the unit or the
+ * cost isn't valid. Returns `null` when Firebase isn't configured.
  */
 export async function createMaterial(
   input: NewMaterialInput,
   actor: string,
 ): Promise<{ id: string } | null> {
+  // Pure, so a bad opening quantity or cost is refused before the database.
+  const opening = input.initial
+    ? receiveStock(
+        EMPTY_STOCK,
+        input.unit,
+        input.initial.qty,
+        input.initial.totalCost,
+      )
+    : EMPTY_STOCK;
+
   const db = getAdminDb();
   if (!db) {
     return null;
@@ -183,11 +214,36 @@ export async function createMaterial(
       name: input.name,
       kind: input.kind,
       unit: input.unit,
-      stock: 0,
-      avgCost: 0,
+      stock: opening.stock,
+      avgCost: opening.avgCost,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
+
+    if (input.initial) {
+      const { qty, totalCost } = input.initial;
+      const purchaseRef = db.collection(COLLECTIONS.purchases).doc();
+
+      appendMovement(tx, ref, {
+        type: "purchase",
+        qty,
+        unitCost: unitCostFromTotal(totalCost, qty),
+        totalCost,
+        refId: purchaseRef.id,
+        actor,
+      });
+      createPurchaseDocument(db, tx, purchaseRef, {
+        date: mexicoDateToInstant(mexicoTodayIso()),
+        supplier: INITIAL_PURCHASE_CONCEPT,
+        items: [
+          { materialId: ref.id, materialName: input.name, qty, totalCost },
+        ],
+        totalCost,
+        initial: true,
+        actor,
+      });
+    }
+
     appendAuditEntry(db, tx, {
       actor,
       action: "material.create",
@@ -204,17 +260,23 @@ export interface AdjustStockInput {
   /** Signed change in the material's unit. */
   delta: number;
   kind: AdjustmentKind;
+  /**
+   * What each added unit cost, integer centavos (0 allowed). REQUIRED when
+   * `delta` is positive, ignored otherwise.
+   */
+  unitCost?: number;
   /** Why — required, stored on the movement as its note. */
   reason: string;
 }
 
 /**
- * A reasoned manual correction (count mismatch, loss in the workshop).
- * Changes `stock` by `delta` and records a movement; it never changes
- * avgCost — only a purchase re-prices inventory. Rejects with an
+ * A reasoned manual adjustment (a physical count that doesn't match, or metal
+ * lost in the workshop). A negative `delta` lowers `stock` only. A positive one
+ * must carry the `unitCost` of what was added and re-weights avgCost, exactly
+ * like a purchase of those units (see applyAdjustment). Rejects with an
  * InventoryError when the material is missing, the quantity doesn't fit its
- * unit, a "loss" isn't negative, or the result would be below zero. Returns
- * `null` when Firebase isn't configured.
+ * unit, a "loss" isn't negative, a positive count has no cost, or the result
+ * would be below zero. Returns `null` when Firebase isn't configured.
  */
 export async function adjustStock(
   input: AdjustStockInput,
@@ -240,22 +302,30 @@ export async function adjustStock(
     }
     const material = toMaterial(snapshot);
 
-    const next = moveStock(
+    const next = applyAdjustment(
       { stock: material.stock, avgCost: material.avgCost },
       material.unit,
+      input.kind,
       input.delta,
+      input.unitCost,
     );
+    // Units that came in carry the cost she stated; units that went out, the
+    // cost they had on the shelf.
+    const unitCost =
+      input.delta > 0 && input.unitCost !== undefined
+        ? input.unitCost
+        : material.avgCost;
 
     tx.update(ref, {
       stock: next.stock,
+      ...(next.avgCost !== material.avgCost ? { avgCost: next.avgCost } : {}),
       updatedAt: FieldValue.serverTimestamp(),
     });
     appendMovement(tx, ref, {
       type: input.kind,
       qty: input.delta,
-      // The value of what was written off, at the cost it carried.
-      unitCost: material.avgCost,
-      totalCost: movementValue(material.avgCost, input.delta),
+      unitCost,
+      totalCost: movementValue(unitCost, input.delta),
       note: input.reason,
       actor,
     });
@@ -267,6 +337,76 @@ export async function adjustStock(
     });
 
     return { stock: next.stock };
+  });
+}
+
+export interface CorrectStockInput {
+  materialId: string;
+  /** The REAL units on hand (0 allowed). */
+  stock: number;
+  /** The REAL average cost, integer centavos per unit. */
+  avgCost: number;
+  /** Why — required, stored on the movement as its note. */
+  reason: string;
+}
+
+/**
+ * "Corregir": sets the real stock and the real average cost, whatever they were
+ * (the way out of a wrong average, which further purchases would only dilute).
+ * One transaction updates the material, appends a "correction" movement (the
+ * signed change in stock, priced at the new average) and the audit entry, which
+ * holds no values. Rejects with an InventoryError when the material is missing,
+ * the stock doesn't fit its unit, the cost is invalid, or nothing would change.
+ * Returns `null` when Firebase isn't configured.
+ */
+export async function correctStock(
+  input: CorrectStockInput,
+  actor: string,
+): Promise<{ stock: number; avgCost: number } | null> {
+  if (!isDocumentId(input.materialId)) {
+    throw new InventoryError("material-not-found");
+  }
+
+  const db = getAdminDb();
+  if (!db) {
+    return null;
+  }
+
+  return db.runTransaction(async (tx) => {
+    const ref = materialRef(db, input.materialId);
+    const snapshot = await tx.get(ref);
+    if (!snapshot.exists) {
+      throw new InventoryError("material-not-found");
+    }
+    const material = toMaterial(snapshot);
+
+    const plan = planCorrection(
+      { stock: material.stock, avgCost: material.avgCost },
+      material.unit,
+      { stock: input.stock, avgCost: input.avgCost },
+    );
+
+    tx.update(ref, {
+      stock: plan.stock,
+      avgCost: plan.avgCost,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    appendMovement(tx, ref, {
+      type: "correction",
+      qty: plan.delta,
+      unitCost: plan.avgCost,
+      totalCost: movementValue(plan.avgCost, plan.delta),
+      note: input.reason,
+      actor,
+    });
+    appendAuditEntry(db, tx, {
+      actor,
+      action: "stock.correct",
+      entity: "material",
+      entityId: ref.id,
+    });
+
+    return { stock: plan.stock, avgCost: plan.avgCost };
   });
 }
 

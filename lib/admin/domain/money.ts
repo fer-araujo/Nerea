@@ -17,6 +17,21 @@ export function pesosToCentavos(pesos: number): number {
   return roundTo(pesos * 100);
 }
 
+const PESOS_TEXT_PATTERN = /^\d{1,8}(?:\.\d{1,2})?$/;
+
+/**
+ * Pesos typed in a form -> integer centavos, or `null` when the text is not a
+ * valid amount (the same rule the server schemas enforce: digits, at most two
+ * decimals). For previews that must show nothing, not a guess, until the field
+ * holds something valid; the server stays the authority.
+ */
+export function parsePesosText(text: string): number | null {
+  const trimmed = text.trim();
+  return PESOS_TEXT_PATTERN.test(trimmed)
+    ? pesosToCentavos(Number(trimmed))
+    : null;
+}
+
 /**
  * Integer centavos -> the text a form field takes back as pesos: 123456 ->
  * "1234.56". Pure integer math (no float division), so it can never print a

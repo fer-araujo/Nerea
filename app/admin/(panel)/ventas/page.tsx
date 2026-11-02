@@ -172,6 +172,11 @@ function SaleRow({ sale }: { sale: Sale }) {
         {sale.costPending ? (
           <span className={BADGE_ATTENTION_CLASS}>Costo pendiente</span>
         ) : null}
+        {/* More units were sold than the shop had (two shoppers paid for the
+            last one, say): the stock was clamped to 0 and a human should look. */}
+        {sale.oversold ? (
+          <span className={BADGE_ATTENTION_CLASS}>Revisar: sobreventa</span>
+        ) : null}
       </div>
 
       {sale.date ? (
@@ -192,9 +197,11 @@ function SaleRow({ sale }: { sale: Sale }) {
             <span className="[overflow-wrap:anywhere]">
               {item.title || item.handle || "Pieza"}
               {item.option ? ` · ${item.option}` : ""}
+              {item.quantity > 1 ? ` · × ${item.quantity}` : ""}
             </span>
+            {/* The line's total: the unit price times its quantity. */}
             <span className={cn(NUMBER_CLASS, "shrink-0")}>
-              {formatMXN(item.price)}
+              {formatMXN(item.price * item.quantity)}
             </span>
           </li>
         ))}
@@ -274,7 +281,7 @@ export default async function AdminSalesPage({
   // still be sold.
   const availablePieces: SalePiece[] = (catalog?.products ?? [])
     .filter((product) => product.availability === "available")
-    .map(({ handle, title, price }) => ({ handle, title, price }));
+    .map(({ handle, title, price, stock }) => ({ handle, title, price, stock }));
 
   return (
     <section>

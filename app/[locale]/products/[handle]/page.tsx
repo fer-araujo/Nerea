@@ -131,7 +131,11 @@ export default async function ProductDetailPage({
               rule. Sold reuses the muted/graphite treatment used elsewhere
               for the gone state. */}
           <Badge variant={isSold ? "muted" : "brass"} className="w-fit">
-            {isSold ? tProduct("soldOut") : tProduct("uniquePiece")}
+            {isSold
+              ? tProduct("soldOut")
+              : product.stock > 1
+                ? tProduct("remaining", { count: product.stock })
+                : tProduct("uniquePiece")}
           </Badge>
 
           <h1 className="font-display text-3xl leading-tight text-ink sm:text-4xl">
@@ -152,6 +156,7 @@ export default async function ProductDetailPage({
 
           <AvailabilityBadge
             availability={product.availability}
+            stock={product.stock}
             specs={product.category ? [product.category.title] : undefined}
             className="border-t border-line pt-4"
           />
@@ -189,6 +194,7 @@ export default async function ProductDetailPage({
                 price: product.price,
                 cover: product.cover,
                 options: product.options,
+                stock: product.stock,
               }}
               className="mt-2"
             />

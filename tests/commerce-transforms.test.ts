@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveLocalized, toAvailability, toMoney } from "../lib/commerce/transforms";
+import {
+  resolveLocalized,
+  toAvailability,
+  toMoney,
+  toStock,
+} from "../lib/commerce/transforms";
 
 // `toAvailability` is a safety-critical, fail-safe derivation: an unknown or
 // missing status must resolve to "sold" (never implying a piece is
@@ -60,5 +65,58 @@ describe("resolveLocalized", () => {
 
   it("falls back to Spanish for 'en' when the English field is an empty string", () => {
     expect(resolveLocalized({ es: "Anillo", en: "" }, "en")).toBe("Anillo");
+  });
+});
+
+// `stock` is the piece count (sanity/schemaTypes/product.ts). When the document
+// has one it decides; when it has none (every document that predates the field)
+// the legacy status decides, with the same fail-safe as above.
+describe("toStock", () => {
+  it("reads a defined stock as it is", () => {
+    expect(toStock(1, "sold")).toBe(1);
+    expect(toStock(7, "available")).toBe(7);
+    expect(toStock(0, "available")).toBe(0);
+  });
+
+  it("floors a fractional count and never goes below zero", () => {
+    expect(toStock(2.9, undefined)).toBe(2);
+    expect(toStock(-4, "available")).toBe(0);
+  });
+
+  it.each([undefined, null])(
+    "falls back to the legacy status when the stock is %j: available is one piece, anything else none",
+    (stock) => {
+      expect(toStock(stock, "available")).toBe(1);
+      expect(toStock(stock, "sold")).toBe(0);
+      expect(toStock(stock, undefined)).toBe(0);
+      expect(toStock(stock, "Available")).toBe(0);
+    },
+  );
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, "3", {}, []])(
+    "does not read %j as a count: the legacy status decides instead, without throwing",
+    (stock) => {
+      expect(() => toStock(stock, "available")).not.toThrow();
+      expect(toStock(stock, "available")).toBe(1);
+      expect(toStock(stock, "sold")).toBe(0);
+    },
+  );
+});
+
+describe("toAvailability with a stock", () => {
+  it("is available while the stock is above zero, even when the legacy status says sold", () => {
+    expect(toAvailability("sold", 3)).toBe("available");
+    expect(toAvailability("available", 1)).toBe("available");
+  });
+
+  it("is sold at zero, even when the legacy status says available", () => {
+    expect(toAvailability("available", 0)).toBe("sold");
+  });
+
+  it("falls back to the legacy status when there is no stock", () => {
+    expect(toAvailability("available", undefined)).toBe("available");
+    expect(toAvailability("available", null)).toBe("available");
+    expect(toAvailability("sold", null)).toBe("sold");
+    expect(toAvailability(undefined, null)).toBe("sold");
   });
 });

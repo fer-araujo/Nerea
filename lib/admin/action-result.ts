@@ -24,10 +24,11 @@ export type ActionFailure = {
 };
 
 // The action DID what was asked, but something around it needs the admin's
-// attention (today: the sale is recorded, yet some pieces could not be marked
-// as sold in the store). It is a success, so the form still clears; the warning
-// is shown next to the confirmation.
-export type ActionWarningCode = "store-not-updated";
+// attention (today: the sale is recorded, yet some pieces could not be taken
+// off the store's stock, or more units were sold than the store had). It is a
+// success, so the form still clears; the warning is shown next to the
+// confirmation.
+export type ActionWarningCode = "store-not-updated" | "oversold";
 
 export type ActionWarning = {
   code: ActionWarningCode;
@@ -51,7 +52,7 @@ const DEFAULT_MESSAGES: Readonly<Record<ActionErrorCode, string>> = {
   "piece-not-found":
     "Una de las piezas ya no existe en el catálogo. Recarga la página.",
   "piece-unavailable":
-    "Una de las piezas ya está vendida. Recarga la página para ver las que siguen disponibles.",
+    "Una de las piezas ya está agotada o no tiene tantas piezas disponibles. Recarga la página para ver cuántas quedan.",
   "sale-not-found": "La venta ya no existe. Recarga la página.",
   "sale-not-voidable":
     "Solo se pueden anular las ventas manuales y las de prueba.",
@@ -72,26 +73,50 @@ export function failure(
   return { ok: false, error, message };
 }
 
+function quotedNames(pieces: readonly string[]): string {
+  return pieces.map((name) => `«${name}»`).join(", ");
+}
+
 // Names the pieces by title (what the admin sees on every list), so she knows
-// exactly which ones to mark in Studio. Titles are rendered as React text, never
+// exactly which ones to fix in Studio. Titles are rendered as React text, never
 // as HTML.
 function storeNotUpdatedMessage(pieces: readonly string[]): string {
-  const names = pieces.map((name) => `«${name}»`).join(", ");
+  const names = quotedNames(pieces);
   return pieces.length === 1
-    ? `La venta quedó registrada, pero no se pudo marcar como vendida en la tienda la pieza ${names}. Márcala como vendida desde Studio.`
-    : `La venta quedó registrada, pero no se pudo marcar como vendidas en la tienda las piezas ${names}. Márcalas como vendidas desde Studio.`;
+    ? `La venta quedó registrada, pero no se pudo descontar de la tienda la pieza ${names}. Ajusta sus piezas disponibles desde Studio.`
+    : `La venta quedó registrada, pero no se pudieron descontar de la tienda las piezas ${names}. Ajusta sus piezas disponibles desde Studio.`;
+}
+
+function oversoldMessage(pieces: readonly string[]): string {
+  const names = quotedNames(pieces);
+  return pieces.length === 1
+    ? `Se vendieron más piezas de ${names} de las que había en la tienda: quedó en 0 y la venta lleva la marca «Revisar: sobreventa».`
+    : `Se vendieron más piezas de ${names} de las que había en la tienda: quedaron en 0 y la venta lleva la marca «Revisar: sobreventa».`;
 }
 
 /**
- * A success that still carries something the admin has to do: the sale is
- * recorded, but these pieces (by title) are still on sale in the store.
+ * A success that still carries something the admin has to do. The sale is
+ * recorded, but `notUpdated` pieces (by title) could not be taken off the
+ * store's stock and are still on sale, and `oversold` ones had fewer units than
+ * were sold. Both empty is a plain success.
  */
-export function successWithStoreWarning(pieces: readonly string[]): ActionSuccess {
+export function successWithStockWarning({
+  notUpdated,
+  oversold,
+}: {
+  notUpdated: readonly string[];
+  oversold: readonly string[];
+}): ActionSuccess {
+  const messages: string[] = [];
+  if (notUpdated.length > 0) messages.push(storeNotUpdatedMessage(notUpdated));
+  if (oversold.length > 0) messages.push(oversoldMessage(oversold));
+  if (messages.length === 0) return { ok: true };
+
   return {
     ok: true,
     warning: {
-      code: "store-not-updated",
-      message: storeNotUpdatedMessage(pieces),
+      code: notUpdated.length > 0 ? "store-not-updated" : "oversold",
+      message: messages.join(" "),
     },
   };
 }

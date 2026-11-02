@@ -5,7 +5,12 @@ import { useLocale, useTranslations } from "next-intl";
 import { AnimatePresence, m } from "motion/react";
 import Image from "next/image";
 import { Link } from "@/i18n/navigation";
-import { useCart, type CartLineItem } from "@/lib/cart/cart-context";
+import {
+  cartLineKey,
+  quantityOfHandle,
+  useCart,
+  type CartLineItem,
+} from "@/lib/cart/cart-context";
 import { checkoutAction } from "@/lib/cart/checkout";
 import { Price } from "@/components/ui/Price";
 import { PlaceholderBlock } from "@/components/ui/PlaceholderBlock";
@@ -14,26 +19,140 @@ import { DURATION_BASE, EASE_OUT } from "@/components/motion/transitions";
 import type { Locale, Money } from "@/lib/commerce/types";
 import { cn } from "@/lib/cn";
 
-// The chosen ring size / chain length under a line's title ("Talla 7",
-// "Cadena 45 cm"). Cart lines come back from localStorage — client-controlled,
+// The + / - buttons of a line: a square target well above WCAG 2.5.8's 24px.
+const QUANTITY_BUTTON_CLASS =
+  "flex size-9 items-center justify-center border border-line font-mono text-sm text-ink transition-colors enabled:hover:border-ink disabled:cursor-not-allowed disabled:opacity-40";
+
+// One row of the cart: thumbnail, title, the chosen ring size / chain length
+// ("Talla 7", "Cadena 45 cm"), the quantity controls, the line total and the
+// remove button. Cart lines come back from localStorage — client-controlled,
 // possibly from an older shape — so the option's fields are checked at
 // runtime and anything unrecognized renders nothing instead of "Talla undefined".
-function CartLineOption({ option }: { option: CartLineItem["option"] }) {
+//
+// The same piece in two sizes is two rows with the same title, so every
+// control is named with the option too ("Quitar una pieza de Anillo, Talla 7"):
+// a screen-reader user can tell the rows apart.
+function CartLine({
+  item,
+  atMax,
+  onSetQuantity,
+  onRemove,
+}: {
+  item: CartLineItem;
+  /** The cart already holds every piece the shop had of this design. */
+  atMax: boolean;
+  onSetQuantity: (quantity: number) => void;
+  onRemove: () => void;
+}) {
   const t = useTranslations("Cart");
+  const { option } = item;
 
-  let label: string | null = null;
+  let optionLabel: string | null = null;
   if (option?.kind === "ringSize" && typeof option.value === "string") {
-    label = t("optionRingSize", { value: option.value });
+    optionLabel = t("optionRingSize", { value: option.value });
   } else if (
     option?.kind === "chainLength" &&
     typeof option.lengthCm === "number"
   ) {
-    label = t("optionChainLength", { cm: option.lengthCm });
+    optionLabel = t("optionChainLength", { cm: option.lengthCm });
   }
+  const lineName = optionLabel ? `${item.title}, ${optionLabel}` : item.title;
+  const lineTotal: Money = {
+    amount: item.price.amount * item.quantity,
+    currency: item.price.currency,
+  };
 
-  return label ? (
-    <p className="mt-1 font-mono text-xs text-graphite">{label}</p>
-  ) : null;
+  return (
+    <li className="flex gap-4 py-5">
+      <div className="relative size-20 shrink-0 overflow-hidden bg-bone-sunk">
+        {item.cover ? (
+          item.cover.kind === "image" ? (
+            <Image
+              src={item.cover.url}
+              alt={item.title}
+              fill
+              sizes="80px"
+              className="object-cover"
+            />
+          ) : (
+            // Static preview only, like ProductGallery's
+            // thumbnails — a tiny 80px line item is not the
+            // place for an autoplaying clip.
+            <video
+              src={item.cover.url}
+              muted
+              playsInline
+              preload="metadata"
+              aria-hidden="true"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          )
+        ) : (
+          <PlaceholderBlock className="absolute inset-0" />
+        )}
+      </div>
+
+      <div className="flex flex-1 flex-col justify-between gap-2">
+        <div>
+          <h3 className="font-display text-base leading-snug text-ink">
+            {item.title}
+          </h3>
+          {optionLabel ? (
+            <p className="mt-1 font-mono text-xs text-graphite">{optionLabel}</p>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div
+            role="group"
+            aria-label={t("quantityGroup", { title: lineName })}
+            className="flex items-center"
+          >
+            <button
+              type="button"
+              onClick={() => onSetQuantity(item.quantity - 1)}
+              disabled={item.quantity <= 1}
+              aria-label={t("decrease", { title: lineName })}
+              className={QUANTITY_BUTTON_CLASS}
+            >
+              <span aria-hidden="true">&minus;</span>
+            </button>
+            <span
+              aria-live="polite"
+              className="min-w-9 text-center font-mono text-xs text-ink"
+            >
+              {t("quantity", { count: item.quantity })}
+            </span>
+            <button
+              type="button"
+              onClick={() => onSetQuantity(item.quantity + 1)}
+              disabled={atMax}
+              aria-label={t("increase", { title: lineName })}
+              className={QUANTITY_BUTTON_CLASS}
+            >
+              <span aria-hidden="true">+</span>
+            </button>
+          </div>
+          <Price money={lineTotal} />
+        </div>
+
+        {atMax && item.stock > 1 ? (
+          <p className="font-mono text-xs text-graphite">
+            {t("onlyLeft", { count: item.stock })}
+          </p>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={t("removeLabel", { title: lineName })}
+          className="w-fit font-mono text-xs uppercase tracking-[0.1em] text-graphite underline decoration-line underline-offset-4 transition-colors hover:text-ink hover:decoration-brass"
+        >
+          {t("remove")}
+        </button>
+      </div>
+    </li>
+  );
 }
 
 // The checkout button and the "reserve by message" link share one look: both
@@ -75,7 +194,15 @@ export function CartDrawer({
   // is always "es" | "en" at runtime even though useLocale()'s type is a
   // plain string.
   const locale = useLocale() as Locale;
-  const { items, isOpen, close, removeItem, removeItems } = useCart();
+  const {
+    items,
+    isOpen,
+    close,
+    removeItem,
+    removeItems,
+    setQuantity,
+    clampToStock,
+  } = useCart();
   const [status, setStatus] = useState<"idle" | "pending">("idle");
   const [error, setError] = useState<string | null>(null);
   // The server can refuse with "payments-disabled" even though this page was
@@ -120,6 +247,15 @@ export function CartDrawer({
     } else if (result.reason === "sold") {
       removeItems(result.soldHandles);
       setError(t("soldNotice"));
+    } else if (result.reason === "cart-too-large") {
+      // The cart stays as it is: the shopper trims it (or pays in two goes).
+      setError(t("tooLargeNotice"));
+    } else if (result.reason === "insufficient-stock") {
+      // The shop has fewer units than the cart asked for: trim those lines to
+      // what is left (the server's number, not the stale one the cart kept) and
+      // say so, so nobody is surprised by a smaller order.
+      clampToStock(result.items);
+      setError(t("stockNotice"));
     } else if (result.reason === "invalid-option") {
       // Same shape as the sold flow: the offending lines leave the cart, and
       // the shopper re-adds each piece after choosing its option again.
@@ -132,7 +268,10 @@ export function CartDrawer({
   }
 
   const subtotal: Money = {
-    amount: items.reduce((sum, item) => sum + item.price.amount, 0),
+    amount: items.reduce(
+      (sum, item) => sum + item.price.amount * item.quantity,
+      0,
+    ),
     currency: "MXN",
   };
 
@@ -205,57 +344,18 @@ export function CartDrawer({
               </div>
             ) : (
               <ul className="flex-1 divide-y divide-line overflow-y-auto px-6">
-                {items.map((item) => (
-                  <li key={item.handle} className="flex gap-4 py-5">
-                    <div className="relative size-20 shrink-0 overflow-hidden bg-bone-sunk">
-                      {item.cover ? (
-                        item.cover.kind === "image" ? (
-                          <Image
-                            src={item.cover.url}
-                            alt={item.title}
-                            fill
-                            sizes="80px"
-                            className="object-cover"
-                          />
-                        ) : (
-                          // Static preview only, like ProductGallery's
-                          // thumbnails — a tiny 80px line item is not the
-                          // place for an autoplaying clip.
-                          <video
-                            src={item.cover.url}
-                            muted
-                            playsInline
-                            preload="metadata"
-                            aria-hidden="true"
-                            className="absolute inset-0 h-full w-full object-cover"
-                          />
-                        )
-                      ) : (
-                        <PlaceholderBlock className="absolute inset-0" />
-                      )}
-                    </div>
-
-                    <div className="flex flex-1 flex-col justify-between gap-2">
-                      <div>
-                        <h3 className="font-display text-base leading-snug text-ink">
-                          {item.title}
-                        </h3>
-                        <CartLineOption option={item.option} />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <Price money={item.price} />
-                        <button
-                          type="button"
-                          onClick={() => removeItem(item.handle)}
-                          aria-label={t("removeLabel", { title: item.title })}
-                          className="font-mono text-xs uppercase tracking-[0.1em] text-graphite underline decoration-line underline-offset-4 transition-colors hover:text-ink hover:decoration-brass"
-                        >
-                          {t("remove")}
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                ))}
+                {items.map((item) => {
+                  const key = cartLineKey(item);
+                  return (
+                    <CartLine
+                      key={key}
+                      item={item}
+                      atMax={quantityOfHandle(items, item.handle) >= item.stock}
+                      onSetQuantity={(quantity) => setQuantity(key, quantity)}
+                      onRemove={() => removeItem(key)}
+                    />
+                  );
+                })}
               </ul>
             )}
 

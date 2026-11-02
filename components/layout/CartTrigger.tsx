@@ -1,18 +1,19 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useCart } from "@/lib/cart/cart-context";
+import { cartPieceCount, useCart } from "@/lib/cart/cart-context";
 import { cn } from "@/lib/cn";
 
 // Client island inside the (Server Component) Header — mirrors
-// LocaleSwitcher's pattern. Shows the current line-item count and opens the
+// LocaleSwitcher's pattern. Shows the number of pieces in the cart and opens the
 // drawer; the drawer itself renders once, globally, from the locale layout
 // (see CartDrawer.tsx / app/[locale]/layout.tsx).
 export function CartTrigger({ className }: { className?: string }) {
   // `Cart` copy is DRAFT PENDING ARTISAN REVIEW — see CartDrawer.tsx.
   const t = useTranslations("Cart");
   const { items, open } = useCart();
-  const count = items.length;
+  // Pieces, not lines: three of one ring is a count of 3.
+  const count = cartPieceCount(items);
 
   return (
     <button

@@ -3,7 +3,7 @@ import {
   type RawOptionDefaults,
   type RawOptionSource,
 } from "../options";
-import { toAvailability, toMoney } from "../transforms";
+import { toAvailability, toMoney, toStock } from "../transforms";
 import type {
   Availability,
   Category,
@@ -66,6 +66,9 @@ interface RawProductSummary {
   title: string;
   price: RawMoney;
   status: string;
+  // Absent (null) on every document that predates the field: `toStock` then
+  // falls back to `status`.
+  stock: number | null;
   cover: RawMediaItem | null;
   categorySlug: string | null;
   collectionSlugs: string[] | null;
@@ -82,6 +85,7 @@ interface RawProduct extends RawOptionSource {
   description: string;
   price: RawMoney;
   status: string;
+  stock: number | null;
   media: (RawMediaItem | null)[];
   category: RawCategory | null;
   collections: RawCollectionRef[] | null;
@@ -91,6 +95,7 @@ interface RawProduct extends RawOptionSource {
 interface RawAvailability {
   handle: string;
   status: string;
+  stock: number | null;
 }
 
 // Storefront reads are ISR-tagged: 60s is the safety net, and the Sanity
@@ -178,7 +183,8 @@ function toProductSummary(raw: RawProductSummary): ProductSummary {
     handle: raw.handle,
     title: raw.title,
     price: toMoney(raw.price),
-    availability: toAvailability(raw.status),
+    availability: toAvailability(raw.status, raw.stock),
+    stock: toStock(raw.stock, raw.status),
     cover: toMediaItem(raw.cover),
     categorySlug: raw.categorySlug ?? undefined,
     collectionSlugs: raw.collectionSlugs ?? [],
@@ -192,7 +198,8 @@ function toProduct(raw: RawProduct): Product {
     title: raw.title,
     description: raw.description,
     price: toMoney(raw.price),
-    availability: toAvailability(raw.status),
+    availability: toAvailability(raw.status, raw.stock),
+    stock: toStock(raw.stock, raw.status),
     cover: media[0] ?? null,
     media,
     category: toCategory(raw.category),
@@ -241,7 +248,7 @@ export const sanityApi: CommerceReadApi = {
       const match = found.find((item) => item.handle === handle);
       // A handle Sanity doesn't return (deleted/unknown) fails safe to
       // "sold" — never let a missing product look purchasable.
-      result[handle] = match ? toAvailability(match.status) : "sold";
+      result[handle] = match ? toAvailability(match.status, match.stock) : "sold";
     }
     return result;
   },

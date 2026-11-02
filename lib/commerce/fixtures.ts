@@ -1,6 +1,11 @@
 import { isCollectionVisible } from "./collections";
 import { resolveProductOptions } from "./options";
-import { resolveLocalized, toAvailability, type Localized } from "./transforms";
+import {
+  resolveLocalized,
+  toAvailability,
+  toStock,
+  type Localized,
+} from "./transforms";
 import type {
   Availability,
   Category,
@@ -42,6 +47,11 @@ interface FixtureProduct {
    * single derivation point, instead of being trusted directly.
    */
   status: string;
+  /**
+   * Mirrors the Studio's `stock` field. Absent = a document that predates it,
+   * so the legacy `status` decides (see `toStock`).
+   */
+  stock?: number;
   /**
    * Mirrors the Studio's `purchaseOption` radio. Fixtures carry no per-piece
    * lists or site settings, so `resolveProductOptions` falls through to the
@@ -177,7 +187,8 @@ function toSummary(product: FixtureProduct, locale: Locale): ProductSummary {
     handle: product.handle,
     title: resolveLocalized(product.title, locale),
     price: product.price,
-    availability: toAvailability(product.status),
+    availability: toAvailability(product.status, product.stock),
+    stock: toStock(product.stock, product.status),
     cover: product.media[0] ?? null,
     categorySlug: product.category?.slug,
     collectionSlugs: visibleCollections(product).map((collection) => collection.slug),
@@ -226,7 +237,9 @@ export const fixturesApi: CommerceReadApi = {
       // An unrecognized handle is treated the same as "sold": never imply a
       // piece is buyable when we don't even recognize it, mirroring the
       // fail-safe default in toAvailability.
-      result[handle] = product ? toAvailability(product.status) : "sold";
+      result[handle] = product
+        ? toAvailability(product.status, product.stock)
+        : "sold";
     }
     return result;
   },

@@ -15,6 +15,19 @@ export type SaleStatus = (typeof SALE_STATUSES)[number];
 /** One manual sale can span several pieces; this bounds the transaction. */
 export const MAX_SALE_ITEMS = 25;
 
+/** Most units of one piece a single sale line can carry (a typo guard, not a stock rule). */
+export const MAX_ITEM_QUANTITY = 999;
+
+/** Whether `value` can be the quantity of a sale line: a whole number from 1 up. */
+export function isSaleQuantity(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 1 &&
+    value <= MAX_ITEM_QUANTITY
+  );
+}
+
 export type SalesErrorCode =
   | "piece-not-found"
   | "piece-unavailable"
@@ -45,15 +58,28 @@ export interface SaleItem {
   handle: string;
   /** Piece title, copied from the catalog when the sale was recorded. */
   title: string;
-  /** What this piece sold for, integer centavos. */
+  /** What ONE unit of this piece sold for, integer centavos. */
   price: number;
+  /** Units sold on this line: a whole number from 1. */
+  quantity: number;
   /** "Talla 7", "Cadena 45 cm", or whatever the jeweler typed. */
   option?: string;
 }
 
-/** What the items add up to, integer centavos. */
-export function itemsSubtotal(items: ReadonlyArray<{ price: number }>): number {
-  return items.reduce((sum, item) => sum + item.price, 0);
+/**
+ * What the items add up to, integer centavos: each unit price times its
+ * quantity (a line without one counts once, the way sales were recorded before
+ * quantities existed).
+ */
+export function itemsSubtotal(
+  items: ReadonlyArray<{ price: number; quantity?: number }>,
+): number {
+  return items.reduce((sum, item) => sum + item.price * (item.quantity ?? 1), 0);
+}
+
+/** Units sold across the items (a line without a quantity counts once). */
+export function itemsUnits(items: ReadonlyArray<{ quantity?: number }>): number {
+  return items.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
 }
 
 // A Checkout Session id says which Stripe mode created it.
@@ -109,23 +135,25 @@ export interface CostSnapshot {
 
 /**
  * The cost of a sale, frozen at the moment it is recorded. `costTotals` maps a
- * handle to its piece's total cost; a handle missing from it has no recorded
- * cost and marks the sale as pending (its cost counts as 0 until then, which
- * is why the gross profit of a pending sale is only an upper bound).
+ * handle to what ONE unit of its piece cost to make; each line costs that times
+ * its quantity (a line without one counts once). A handle missing from the map
+ * has no recorded cost and marks the sale as pending (its cost counts as 0
+ * until then, which is why the gross profit of a pending sale is only an upper
+ * bound).
  */
 export function costSnapshot(
-  handles: readonly string[],
+  items: ReadonlyArray<{ handle: string; quantity?: number }>,
   costTotals: ReadonlyMap<string, number>,
 ): CostSnapshot {
   let costOfGoods = 0;
   let costPending = false;
 
-  for (const handle of handles) {
+  for (const { handle, quantity = 1 } of items) {
     const cost = costTotals.get(handle);
     if (cost === undefined) {
       costPending = true;
     } else {
-      costOfGoods += cost;
+      costOfGoods += cost * quantity;
     }
   }
   return { costOfGoods, costPending };

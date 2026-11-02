@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_ITEM_QUANTITY,
   MAX_SALE_ITEMS,
   SALE_SOURCES,
   SALE_STATUSES,
   SalesError,
   costSnapshot,
+  isSaleQuantity,
   isVoidableSale,
   itemsSubtotal,
+  itemsUnits,
   resolveLivemode,
   summarizeSales,
   type SaleFigures,
@@ -35,6 +38,39 @@ describe("itemsSubtotal", () => {
   it("is zero for no items", () => {
     expect(itemsSubtotal([])).toBe(0);
   });
+
+  it("multiplies each unit price by its quantity", () => {
+    expect(
+      itemsSubtotal([
+        { price: 185_000, quantity: 3 },
+        { price: 99_950, quantity: 2 },
+      ]),
+    ).toBe(555_000 + 199_900);
+  });
+
+  it("counts a line without a quantity once, as sales were recorded before quantities existed", () => {
+    expect(itemsSubtotal([{ price: 100 }, { price: 50, quantity: 4 }])).toBe(300);
+  });
+});
+
+describe("itemsUnits", () => {
+  it("adds the quantities, a line without one counting once", () => {
+    expect(itemsUnits([{ quantity: 3 }, {}, { quantity: 2 }])).toBe(6);
+    expect(itemsUnits([])).toBe(0);
+  });
+});
+
+describe("isSaleQuantity", () => {
+  it.each([1, 2, 17, MAX_ITEM_QUANTITY])("accepts %j", (value) => {
+    expect(isSaleQuantity(value)).toBe(true);
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, MAX_ITEM_QUANTITY + 1, "2", null, undefined])(
+    "rejects %j",
+    (value) => {
+      expect(isSaleQuantity(value)).toBe(false);
+    },
+  );
 });
 
 describe("costSnapshot", () => {
@@ -44,27 +80,52 @@ describe("costSnapshot", () => {
       ["aretes", 25_000],
     ]);
 
-    expect(costSnapshot(["anillo", "aretes"], totals)).toEqual({
+    expect(costSnapshot([{ handle: "anillo" }, { handle: "aretes" }], totals)).toEqual({
       costOfGoods: 75_000,
       costPending: false,
     });
   });
 
+  it("multiplies one unit's cost by the quantity of each line", () => {
+    const totals = new Map([
+      ["anillo", 50_000],
+      ["aretes", 25_000],
+    ]);
+
+    expect(
+      costSnapshot(
+        [
+          { handle: "anillo", quantity: 3 },
+          { handle: "aretes", quantity: 2 },
+          // The same design in a second size draws on the same unit cost.
+          { handle: "anillo", quantity: 1 },
+        ],
+        totals,
+      ),
+    ).toEqual({ costOfGoods: 150_000 + 50_000 + 50_000, costPending: false });
+  });
+
+  it("marks a line with a quantity pending when its piece has no cost, whatever the quantity", () => {
+    expect(
+      costSnapshot([{ handle: "anillo", quantity: 5 }], new Map()),
+    ).toEqual({ costOfGoods: 0, costPending: true });
+  });
+
   it("marks the sale pending when any piece has no cost, counting what is known", () => {
     const totals = new Map([["anillo", 50_000]]);
 
-    expect(costSnapshot(["anillo", "aretes"], totals)).toEqual({
+    expect(costSnapshot([{ handle: "anillo" }, { handle: "aretes" }], totals)).toEqual({
       costOfGoods: 50_000,
       costPending: true,
     });
   });
 
   it("tells a recorded cost of ZERO apart from no cost at all", () => {
-    expect(costSnapshot(["regalo"], new Map([["regalo", 0]]))).toEqual({
+    expect(costSnapshot([{ handle: "regalo" }], new Map([["regalo", 0]]))).toEqual({
       costOfGoods: 0,
       costPending: false,
     });
-    expect(costSnapshot(["regalo"], new Map())).toEqual({
+    expect(costSnapshot([{ handle: "regalo" }], new Map())).toEqual({
       costOfGoods: 0,
       costPending: true,
     });

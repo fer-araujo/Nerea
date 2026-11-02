@@ -1,6 +1,6 @@
 import "server-only";
 import { sanityClient } from "@/lib/commerce/sanity/client";
-import { toAvailability } from "@/lib/commerce/transforms";
+import { toAvailability, toStock } from "@/lib/commerce/transforms";
 import type { Availability } from "@/lib/commerce/types";
 import { isCentavos } from "@/lib/admin/domain/money";
 
@@ -29,6 +29,8 @@ export interface CatalogProduct {
   /** Base price, integer centavos. */
   price: number;
   availability: Availability;
+  /** Pieces that can still be sold (`stock`, or the legacy `status` for an old document). */
+  stock: number;
   categoryTitle: string | null;
 }
 
@@ -43,6 +45,7 @@ interface RawCatalogProduct {
   title: string | null;
   price: number | null;
   status: string | null;
+  stock: number | null;
   category: { title: string | null } | null;
 }
 
@@ -51,6 +54,7 @@ const PRODUCT_PROJECTION = `{
   "title": coalesce(title.es, ""),
   "price": coalesce(price.amount, 0),
   status,
+  stock,
   "category": category->{ "title": coalesce(title.es, "") }
 }`;
 
@@ -59,7 +63,7 @@ const CATALOG_QUERY = `
 `;
 
 const CATALOG_BY_HANDLES_QUERY = `
-*[_type == "product" && slug.current in $handles] ${PRODUCT_PROJECTION}
+*[_type == "product" && slug.current in $handles && !(_id in path("drafts.**"))] ${PRODUCT_PROJECTION}
 `;
 
 function toCatalogProduct(raw: RawCatalogProduct): CatalogProduct | null {
@@ -75,7 +79,8 @@ function toCatalogProduct(raw: RawCatalogProduct): CatalogProduct | null {
       typeof raw.price === "number" && isCentavos(raw.price) ? raw.price : 0,
     // Anything but the literal "available" is sold: never let a doubtful
     // piece look sellable.
-    availability: toAvailability(raw.status),
+    availability: toAvailability(raw.status, raw.stock),
+    stock: toStock(raw.stock, raw.status),
     categoryTitle:
       typeof raw.category?.title === "string" && raw.category.title !== ""
         ? raw.category.title

@@ -39,6 +39,7 @@ function piece(
     title: handle,
     price: { amount: 100, currency: "MXN" },
     availability: "available",
+    stock: 1,
     cover: null,
     categorySlug,
     collectionSlugs,

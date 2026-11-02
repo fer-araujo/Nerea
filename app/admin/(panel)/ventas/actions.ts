@@ -4,10 +4,11 @@ import { requireAdmin } from "@/lib/admin/auth/session";
 import {
   failure,
   failureFromError,
-  successWithStoreWarning,
+  successWithStockWarning,
   type ActionResult,
 } from "@/lib/admin/action-result";
 import {
+  markSaleOversold,
   recordManualSale,
   refreshSaleFee,
   voidSale,
@@ -21,7 +22,7 @@ import {
   voidSaleSchema,
 } from "@/lib/admin/schemas";
 import { updateProductsAfterSale } from "@/lib/commerce/revalidate";
-import { markProductsSold } from "@/lib/commerce/sanity/mark-sold";
+import { decrementStock } from "@/lib/commerce/sanity/stock";
 
 // Same order as every admin action: authorize FIRST, then validate the
 // untrusted FormData with zod, then touch the data layer, then answer with a
@@ -30,16 +31,19 @@ import { markProductsSold } from "@/lib/commerce/sanity/mark-sold";
 
 /**
  * "Registrar venta": a sale made outside the online shop. The pieces arrive as
- * three parallel repeated fields — itemHandle, itemPrice, itemOption — one
- * value per row; if the three don't line up the request was not produced by the
- * form, and it is refused.
+ * four parallel repeated fields — itemHandle, itemPrice, itemQuantity,
+ * itemOption — one value per row; if they don't line up the request was not
+ * produced by the form, and it is refused.
  *
  * The sale is recorded FIRST: it is the source of truth. Only then, if asked
- * ("Marcar como vendida en la tienda"), are the pieces marked sold in Sanity,
- * and any that could not be marked (no write token, Sanity down, a patch that
- * failed) come back in a typed warning that NAMES them, while the sale stays
- * recorded — the other order would leave a piece sold in the store with no sale
- * behind it, and a retry would then be refused because the piece is "sold".
+ * ("Descontar de la tienda"), are the sold units taken off the stock in Sanity,
+ * and any piece that could not be updated (no write token, Sanity down, a
+ * transaction that failed) comes back in a typed warning that NAMES it, while
+ * the sale stays recorded — the other order would leave units gone from the
+ * store with no sale behind them, and a retry would then be refused because
+ * the stock no longer covers it. A piece that had fewer units than were sold
+ * ends at 0, is named in an "oversold" warning, and flags the sale
+ * "Revisar: sobreventa".
  */
 export async function recordManualSaleAction(
   formData: FormData,
@@ -52,8 +56,13 @@ export async function recordManualSaleAction(
 
   const handles = formTexts(formData, "itemHandle");
   const prices = formTexts(formData, "itemPrice");
+  const quantities = formTexts(formData, "itemQuantity");
   const options = formTexts(formData, "itemOption");
-  if (handles.length !== prices.length || handles.length !== options.length) {
+  if (
+    handles.length !== prices.length ||
+    handles.length !== quantities.length ||
+    handles.length !== options.length
+  ) {
     return failure("invalid");
   }
 
@@ -63,17 +72,18 @@ export async function recordManualSaleAction(
     terminalFee: formText(formData, "terminalFee"),
     note: formText(formData, "note"),
     // A checkbox posts its value when ticked and nothing at all when not.
-    markSold: formText(formData, "markSold") === "on",
+    decrementStock: formText(formData, "decrementStock") === "on",
     items: handles.map((handle, index) => ({
       handle,
       price: prices[index],
+      quantity: quantities[index],
       option: options[index],
     })),
   });
   if (!parsed.success) {
     return failure("invalid", firstIssueMessage(parsed.error));
   }
-  const { markSold, ...sale } = parsed.data;
+  const { decrementStock: takeOffStock, ...sale } = parsed.data;
 
   let recorded: Awaited<ReturnType<typeof recordManualSale>>;
   try {
@@ -86,29 +96,43 @@ export async function recordManualSaleAction(
     return failure("unavailable");
   }
 
-  // `markProductsSold` never throws: what it could not mark comes back in
+  // `decrementStock` never throws: what it could not update comes back in
   // `failed` (a missing write token fails every piece, it is never a silent
   // no-op), and a product that vanished since the sale (`missing`) is nothing
   // to warn about.
-  const notMarked: string[] = [];
-  if (markSold) {
-    const { marked, failed } = await markProductsSold(
-      recorded.items.map((item) => item.handle),
+  const notUpdated: string[] = [];
+  const oversold: string[] = [];
+  if (takeOffStock) {
+    // Keyed on the sale's id: the stock is taken off once per (sale, piece),
+    // however many times this runs.
+    const result = await decrementStock(
+      recorded.items.map((item) => ({ handle: item.handle, qty: item.quantity })),
+      recorded.id,
     );
-    // The pieces that were marked are off the shelf: expire the cached catalog
-    // so the storefront stops offering them (best-effort: the sale is already
-    // recorded and must not turn into an error here).
-    if (marked.length > 0) {
+    // The units that were taken off are gone from the shelf: expire the cached
+    // catalog so the storefront stops offering them (best-effort: the sale is
+    // already recorded and must not turn into an error here).
+    if (result.decremented.length > 0) {
       updateProductsAfterSale();
     }
     const titles = new Map(recorded.items.map((item) => [item.handle, item.title]));
-    notMarked.push(...failed.map((handle) => titles.get(handle) ?? handle));
+    const titleOf = (handle: string) => titles.get(handle) ?? handle;
+    notUpdated.push(...result.failed.map(titleOf));
+    oversold.push(...result.oversold.map(titleOf));
+
+    // Put the mark on the sale itself, where "Revisar: sobreventa" is read
+    // from. If even that fails the warning below still tells the admin.
+    if (result.oversold.length > 0) {
+      try {
+        await markSaleOversold(recorded.id);
+      } catch {
+        // Nothing to add: the warning already names the pieces.
+      }
+    }
   }
 
   revalidateSalesViews();
-  return notMarked.length === 0
-    ? { ok: true }
-    : successWithStoreWarning(notMarked);
+  return successWithStockWarning({ notUpdated, oversold });
 }
 
 /**

@@ -15,7 +15,10 @@ interface PurchasePanelProps {
    * everything passed here is serialized into the client payload. Gallery
    * media and the description stay on the server.
    */
-  product: Pick<Product, "handle" | "title" | "price" | "cover" | "options">;
+  product: Pick<
+    Product,
+    "handle" | "title" | "price" | "cover" | "options" | "stock"
+  >;
   className?: string;
 }
 
@@ -52,6 +55,7 @@ export function PurchasePanel({ label, product, className }: PurchasePanelProps)
             amount: product.price.amount + extra,
           },
           cover: product.cover,
+          stock: product.stock,
         }}
         option={check.valid ? (check.option ?? undefined) : undefined}
         disabled={!check.valid}

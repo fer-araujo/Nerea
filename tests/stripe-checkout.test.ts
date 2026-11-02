@@ -317,13 +317,160 @@ describe("createCheckoutSession — metadata", () => {
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves metadata out entirely when there are no handles and no options", async () => {
+  it("leaves metadata out entirely when there are no handles, no items and no options", async () => {
     await createCheckoutSession(ONE_LINE, OPTIONS);
-    await createCheckoutSession(ONE_LINE, { ...OPTIONS, handles: [], options: [] });
+    await createCheckoutSession(ONE_LINE, {
+      ...OPTIONS,
+      handles: [],
+      items: [],
+      options: [],
+    });
 
     expect(createMock.mock.calls[0][0]).not.toHaveProperty("metadata");
     expect(createMock.mock.calls[1][0]).not.toHaveProperty("metadata");
   });
+});
+
+describe("createCheckoutSession — quantities", () => {
+  beforeEach(() => {
+    createMock.mockResolvedValue({ url: "https://checkout.stripe.com/c/test_qty" });
+  });
+
+  it("sends a line item's quantity to Stripe as is, so a multi-unit line is charged per unit", async () => {
+    await createCheckoutSession(
+      [{ name: "Anillo — Talla 7", amount: 185000, quantity: 3 }],
+      OPTIONS,
+    );
+
+    expect(createMock.mock.calls[0][0].line_items).toEqual([
+      {
+        price_data: {
+          currency: "mxn",
+          product_data: { name: "Anillo — Talla 7" },
+          unit_amount: 185000,
+        },
+        quantity: 3,
+      },
+    ]);
+  });
+
+  it("gives each (piece, option) line its own Stripe line item and quantity", async () => {
+    await createCheckoutSession(
+      [
+        { name: "Anillo — Talla 6", amount: 185000, quantity: 2 },
+        { name: "Anillo — Talla 7", amount: 185000, quantity: 1 },
+        { name: "Aretes", amount: 95000, quantity: 4 },
+      ],
+      OPTIONS,
+    );
+
+    expect(
+      createMock.mock.calls[0][0].line_items.map(
+        (item: { quantity: number }) => item.quantity,
+      ),
+    ).toEqual([2, 1, 4]);
+  });
+
+  it("attaches metadata.items next to the legacy handles", async () => {
+    await createCheckoutSession(ONE_LINE, {
+      ...OPTIONS,
+      handles: ["anillo", "aretes"],
+      items: [
+        { handle: "anillo", quantity: 2, option: { kind: "ringSize", value: "7" } },
+        { handle: "aretes", quantity: 1 },
+      ],
+    });
+
+    expect(createMock.mock.calls[0][0].metadata).toEqual({
+      handles: "anillo,aretes",
+      items: "anillo*2|size=7;aretes*1",
+    });
+  });
+
+  it("writes chain lengths and several lines of one piece into items", async () => {
+    await createCheckoutSession(ONE_LINE, {
+      ...OPTIONS,
+      handles: ["anillo", "dije"],
+      items: [
+        { handle: "anillo", quantity: 1, option: { kind: "ringSize", value: "6" } },
+        { handle: "anillo", quantity: 2, option: { kind: "ringSize", value: "7.5" } },
+        { handle: "dije", quantity: 1, option: { kind: "chainLength", lengthCm: 45 } },
+      ],
+    });
+
+    expect(createMock.mock.calls[0][0].metadata.items).toBe(
+      "anillo*1|size=6;anillo*2|size=7.5;dije*1|chain=45",
+    );
+  });
+
+  it("escapes what the format itself uses, so an odd handle or size cannot split an entry", async () => {
+    await createCheckoutSession(ONE_LINE, {
+      ...OPTIONS,
+      items: [
+        { handle: "a;b*c|d=e,f%g", quantity: 1, option: { kind: "ringSize", value: "7;8" } },
+      ],
+    });
+
+    expect(createMock.mock.calls[0][0].metadata.items).toBe(
+      "a%3Bb%2Ac%7Cd%3De%2Cf%25g*1|size=7%3B8",
+    );
+  });
+
+  // The webhook sells from metadata.items. A cut value would silently drop the
+  // last units from the stock count (an oversell), so the cap fails closed
+  // before any session exists, exactly like the handles.
+  it("throws instead of truncating when the items exceed 500 characters, creating no session", async () => {
+    const items = Array.from({ length: 30 }, (_, index) => ({
+      handle: `pieza-con-un-nombre-largo-${index}`,
+      quantity: 2,
+    }));
+
+    await expect(
+      createCheckoutSession(ONE_LINE, { ...OPTIONS, items }),
+    ).rejects.toThrow(/metadata limit/);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts items of exactly 500 characters, and rejects one more", async () => {
+    // "<handle>*1": the handle takes the rest of the 500.
+    await createCheckoutSession(ONE_LINE, {
+      ...OPTIONS,
+      items: [{ handle: "a".repeat(498), quantity: 1 }],
+    });
+    expect(createMock.mock.calls[0][0].metadata.items).toHaveLength(500);
+
+    await expect(
+      createCheckoutSession(ONE_LINE, {
+        ...OPTIONS,
+        items: [{ handle: "a".repeat(499), quantity: 1 }],
+      }),
+    ).rejects.toThrow(/metadata limit/);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("measures the ESCAPED length: a handle full of reserved characters can tip it over", async () => {
+    // 170 semicolons escape to 510 characters.
+    await expect(
+      createCheckoutSession(ONE_LINE, {
+        ...OPTIONS,
+        items: [{ handle: ";".repeat(170), quantity: 1 }],
+      }),
+    ).rejects.toThrow(/metadata limit/);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    "refuses an item whose quantity is %j, creating no session",
+    async (quantity) => {
+      await expect(
+        createCheckoutSession(ONE_LINE, {
+          ...OPTIONS,
+          items: [{ handle: "anillo", quantity }],
+        }),
+      ).rejects.toThrow();
+      expect(createMock).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("createCheckoutSession — failure paths", () => {

@@ -73,6 +73,7 @@ export const PRODUCTS_LIST_QUERY = `
   "title": coalesce(title[$locale], title.es, ""),
   "price": { "amount": coalesce(price.amount, 0), "currency": coalesce(price.currency, "MXN") },
   status,
+  stock,
   "cover": media[0]${MEDIA_ITEM_PROJECTION},
   "categorySlug": category->slug.current,
   "collectionSlugs": coalesce(${VISIBLE_COLLECTION_REFS}->slug.current, [])
@@ -80,12 +81,13 @@ export const PRODUCTS_LIST_QUERY = `
 `;
 
 export const PRODUCT_BY_HANDLE_QUERY = `
-*[_type == "product" && slug.current == $handle][0] {
+*[_type == "product" && slug.current == $handle && !(_id in path("drafts.**"))][0] {
   "handle": slug.current,
   "title": coalesce(title[$locale], title.es, ""),
   "description": coalesce(description[$locale], description.es, ""),
   "price": { "amount": coalesce(price.amount, 0), "currency": coalesce(price.currency, "MXN") },
   status,
+  stock,
   "media": media[]${MEDIA_ITEM_PROJECTION},
   "category": category->{
     "title": coalesce(title[$locale], title.es, ""),
@@ -107,9 +109,10 @@ export const PRODUCT_BY_HANDLE_QUERY = `
 `;
 
 export const AVAILABILITY_BY_HANDLES_QUERY = `
-*[_type == "product" && slug.current in $handles] {
+*[_type == "product" && slug.current in $handles && !(_id in path("drafts.**"))] {
   "handle": slug.current,
-  status
+  status,
+  stock
 }
 `;
 

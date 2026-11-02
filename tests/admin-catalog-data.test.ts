@@ -21,6 +21,8 @@ function raw(overrides: Record<string, unknown> = {}) {
     title: "Anillo Luna",
     price: 185_000,
     status: "available",
+    // A document from before the stock field has none: the legacy status decides.
+    stock: null,
     category: { title: "Anillos" },
     ...overrides,
   };
@@ -44,6 +46,7 @@ describe("listCatalog", () => {
           title: "Anillo Luna",
           price: 185_000,
           availability: "available",
+          stock: 1,
           categoryTitle: "Anillos",
         },
         {
@@ -51,11 +54,38 @@ describe("listCatalog", () => {
           title: "Aretes Sol",
           price: 185_000,
           availability: "sold",
+          stock: 0,
           categoryTitle: null,
         },
       ],
       truncated: false,
     });
+  });
+
+  it("reads the piece count from the stock field, which wins over the legacy status", async () => {
+    fetchMock.mockResolvedValue([
+      raw({ handle: "serie", status: "sold", stock: 4 }),
+      raw({ handle: "agotada", status: "available", stock: 0 }),
+      raw({ handle: "unica", status: "available", stock: 1 }),
+    ]);
+
+    const { products } = await listCatalog();
+
+    expect(
+      products.map(({ handle, availability, stock }) => [handle, availability, stock]),
+    ).toEqual([
+      ["serie", "available", 4],
+      ["agotada", "sold", 0],
+      ["unica", "available", 1],
+    ]);
+  });
+
+  it("projects the stock field next to the legacy status", async () => {
+    fetchMock.mockResolvedValue([]);
+
+    await listCatalog();
+
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\bstock\b/);
   });
 
   it("binds the limit as a parameter and adds no cache options, so it is never stale", async () => {
@@ -112,6 +142,7 @@ describe("listCatalog", () => {
       price: 0,
       // Anything but the literal "available" is sold: never a doubtful "yes".
       availability: "sold",
+      stock: 0,
       categoryTitle: null,
     });
     expect(products[1].price).toBe(0);
@@ -127,6 +158,14 @@ describe("listCatalog", () => {
 });
 
 describe("getCatalogProducts", () => {
+  it("excludes drafts from the lookup a manual sale checks the stock against", async () => {
+    fetchMock.mockResolvedValue([]);
+
+    await getCatalogProducts(["anillo-luna"]);
+
+    expect(fetchMock.mock.calls[0][0]).toContain('!(_id in path("drafts.**"))');
+  });
+
   it("returns the products asked for, by handle", async () => {
     fetchMock.mockResolvedValue([raw(), raw({ handle: "aretes-sol", title: "Aretes Sol" })]);
 

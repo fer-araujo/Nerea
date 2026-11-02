@@ -38,9 +38,10 @@
   },
   "Product": {
     "available": "disponible",
-    "sold": "vendida",
+    "sold": "agotada",
     "uniquePiece": "Pieza única",
-    "soldOut": "Pieza única — vendida",
+    "remaining": "Quedan {count}",
+    "soldOut": "Agotada",
     "viewDetails": "Ver pieza",
     "thumbnail": "Imagen {number}"
   },
@@ -79,7 +80,8 @@
     "chainLengthLegend": "Largo de cadena",
     "chainLengthChip": "{cm} cm",
     "ringSizeHint": "Elige tu talla para poder adquirir esta pieza.",
-    "chainLengthHint": "Elige el largo de la cadena para poder adquirir esta pieza."
+    "chainLengthHint": "Elige el largo de la cadena para poder adquirir esta pieza.",
+    "allInCartHint": "Ya tienes en el carrito todas las piezas disponibles."
   },
   "Cart": {
     "title": "Carrito",
@@ -89,6 +91,13 @@
     "browseCta": "Ver la tienda",
     "remove": "Eliminar",
     "removeLabel": "Eliminar {title} del carrito",
+    "quantity": "× {count}",
+    "quantityGroup": "Cantidad de {title}",
+    "decrease": "Quitar una pieza de {title}",
+    "increase": "Agregar una pieza de {title}",
+    "onlyLeft": "Solo quedan {count}",
+    "tooLargeNotice": "Tu carrito es demasiado grande para pagarlo de una sola vez. Quita algunas piezas o paga en dos pedidos.",
+    "stockNotice": "Algunas piezas ya no tienen tantas unidades disponibles. Ajustamos las cantidades de tu carrito a las que quedan.",
     "subtotal": "Subtotal",
     "checkout": "Proceder al pago",
     "checkingOut": "Procesando…",

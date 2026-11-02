@@ -41,11 +41,12 @@ vi.mock("@/lib/admin/data/catalog", () => ({
   getCatalogProducts: (...args: unknown[]) => getCatalogProductsMock(...args),
 }));
 
-// markProductsSold reports what happened to each handle (marked / missing /
-// failed); how it decides that is covered in tests/mark-sold.test.ts.
-const markProductsSoldMock = vi.fn();
-vi.mock("@/lib/commerce/sanity/mark-sold", () => ({
-  markProductsSold: (...args: unknown[]) => markProductsSoldMock(...args),
+// decrementStock reports what happened to each handle (decremented / missing /
+// failed / oversold); how it decides that is covered in
+// tests/decrement-stock.test.ts.
+const decrementStockMock = vi.fn();
+vi.mock("@/lib/commerce/sanity/stock", () => ({
+  decrementStock: (...args: unknown[]) => decrementStockMock(...args),
 }));
 
 // What Stripe answers about a payment's fee is covered in tests/stripe-fees.test.ts;
@@ -82,11 +83,13 @@ interface CatalogEntry {
   title: string;
   price: number;
   availability: "available" | "sold";
+  stock: number;
 }
 
+// The ring is made in several copies (5), the earrings are two.
 const DEFAULT_CATALOG: CatalogEntry[] = [
-  { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, availability: "available" },
-  { handle: "aretes-sol", title: "Aretes Sol", price: 90_000, availability: "available" },
+  { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, availability: "available", stock: 5 },
+  { handle: "aretes-sol", title: "Aretes Sol", price: 90_000, availability: "available", stock: 2 },
 ];
 
 function stockCatalog(entries: CatalogEntry[] = DEFAULT_CATALOG) {
@@ -104,7 +107,7 @@ function seedSale(id: string, overrides: Record<string, unknown> = {}) {
     source: "manual",
     status: "active",
     date: new FakeTimestamp(new Date("2026-10-01T06:00:00Z")),
-    items: [{ handle: "anillo-luna", title: "Anillo Luna", price: 185_000 }],
+    items: [{ handle: "anillo-luna", title: "Anillo Luna", price: 185_000, quantity: 1 }],
     subtotal: 185_000,
     shipping: 0,
     total: 185_000,
@@ -126,6 +129,11 @@ function seedPendingStripeSale(id: string, overrides: Record<string, unknown> = 
   });
 }
 
+// The id of the (only) sale recorded: what the stock decrement is keyed on.
+function saleId(): string {
+  return fake.directChildren("sales")[0].path.split("/")[1];
+}
+
 function messageOf(result: unknown): string {
   return (result as { message: string }).message;
 }
@@ -145,10 +153,11 @@ const SALE_FORM = {
   date: TODAY,
   itemHandle: "anillo-luna",
   itemPrice: "1850.00",
+  itemQuantity: "1",
   itemOption: "Talla 7",
   shipping: "150",
   note: "Entrega en persona",
-  markSold: "on",
+  decrementStock: "on",
 };
 
 beforeEach(() => {
@@ -156,11 +165,12 @@ beforeEach(() => {
   fake = new FakeFirestore();
   getAdminDbMock.mockReturnValue(fake);
   requireAdminMock.mockResolvedValue(ADMIN);
-  // By default every handle is marked.
-  markProductsSoldMock.mockImplementation(async (handles: string[]) => ({
-    marked: handles,
+  // By default every handle's stock is lowered.
+  decrementStockMock.mockImplementation(async (items: Array<{ handle: string }>) => ({
+    decremented: items.map((item) => item.handle),
     missing: [],
     failed: [],
+    oversold: [],
   }));
   // By default Stripe has the fee: Stripe's fee with the IVA, and the net.
   fetchStripeFeesMock.mockResolvedValue({ fee: 7_540, net: 192_460 });
@@ -225,7 +235,7 @@ describe.each(ACTIONS)("$name", ({ run, validForm, seed, refreshes }) => {
 
     expect(getAdminDbMock).not.toHaveBeenCalled();
     expect(getCatalogProductsMock).not.toHaveBeenCalled();
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
     // Nor is Stripe asked anything on behalf of someone who is not an admin.
     expect(fetchStripeFeesMock).not.toHaveBeenCalled();
     expect(fake.committed).toHaveLength(0);
@@ -250,7 +260,7 @@ describe.each(ACTIONS)("$name", ({ run, validForm, seed, refreshes }) => {
       error: "unavailable",
     });
     expect(revalidatePathMock).not.toHaveBeenCalled();
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
     expect(fetchStripeFeesMock).not.toHaveBeenCalled();
   });
 
@@ -264,7 +274,7 @@ describe.each(ACTIONS)("$name", ({ run, validForm, seed, refreshes }) => {
     expect(JSON.stringify(result)).not.toContain("secret internal detail");
     expect(revalidatePathMock).not.toHaveBeenCalled();
     // A sale that was not recorded must not take the piece off the shelf.
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
   });
 
   it("refuses a request that is not a FormData, after authorizing and before any data access", async () => {
@@ -401,7 +411,7 @@ describe("savePieceCostAction", () => {
 });
 
 describe("recordManualSaleAction", () => {
-  it("records the sale with centavos, catalog titles and the admin's uid, then marks the piece sold", async () => {
+  it("records the sale with centavos, catalog titles and the admin's uid, then takes the unit off the stock", async () => {
     fake.seed("pieces/anillo-luna", { costs: { metal: 40_000, stones: 15_000, other: 5_000 } });
 
     const result = await recordManualSaleAction(form(SALE_FORM));
@@ -412,7 +422,13 @@ describe("recordManualSaleAction", () => {
       source: "manual",
       status: "active",
       items: [
-        { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, option: "Talla 7" },
+        {
+          handle: "anillo-luna",
+          title: "Anillo Luna",
+          price: 185_000,
+          quantity: 1,
+          option: "Talla 7",
+        },
       ],
       subtotal: 185_000,
       shipping: 15_000,
@@ -422,7 +438,7 @@ describe("recordManualSaleAction", () => {
       note: "Entrega en persona",
       actor: ADMIN.uid,
     });
-    expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna"]);
+    expect(decrementStockMock).toHaveBeenCalledWith([{ handle: "anillo-luna", qty: 1 }], saleId());
     const [audit] = fake.directChildren("auditLog");
     expect(audit.data).toMatchObject({ action: "sale.record", entity: "sale", entityId: sale.path.split("/")[1] });
   });
@@ -433,9 +449,10 @@ describe("recordManualSaleAction", () => {
         date: TODAY,
         itemHandle: ["anillo-luna", "aretes-sol"],
         itemPrice: ["1500", "900.00"],
+        itemQuantity: ["1", "1"],
         itemOption: ["", ""],
         shipping: "",
-        markSold: "on",
+        decrementStock: "on",
       }),
     );
 
@@ -450,38 +467,254 @@ describe("recordManualSaleAction", () => {
         { handle: "aretes-sol", price: 90_000 },
       ],
     });
-    expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna", "aretes-sol"]);
+    expect(decrementStockMock).toHaveBeenCalledWith([
+      { handle: "anillo-luna", qty: 1 },
+      { handle: "aretes-sol", qty: 1 },
+    ], saleId());
   });
 
-  it("records the sale BEFORE marking the piece sold, never the other way round", async () => {
-    let salesWhenMarked = -1;
-    markProductsSoldMock.mockImplementation(async (handles: string[]) => {
-      salesWhenMarked = fake.directChildren("sales").length;
-      return { marked: handles, missing: [], failed: [] };
+  describe("quantities", () => {
+    const THREE_RINGS = { ...SALE_FORM, itemQuantity: "3" };
+
+    it("records the quantity per line: the subtotal is unit price x quantity, the cost is one unit's cost x quantity", async () => {
+      fake.seed("pieces/anillo-luna", { costs: { metal: 40_000, stones: 15_000, other: 5_000 } });
+
+      const result = await recordManualSaleAction(form(THREE_RINGS));
+
+      expect(result).toEqual({ ok: true });
+      const [sale] = fake.directChildren("sales");
+      expect(sale.data).toMatchObject({
+        items: [{ handle: "anillo-luna", price: 185_000, quantity: 3 }],
+        subtotal: 555_000,
+        shipping: 15_000,
+        total: 570_000,
+        costOfGoods: 180_000,
+        costPending: false,
+      });
+    });
+
+    it("takes exactly the sold quantity off the stock", async () => {
+      await recordManualSaleAction(form(THREE_RINGS));
+
+      expect(decrementStockMock).toHaveBeenCalledTimes(1);
+      expect(decrementStockMock).toHaveBeenCalledWith([{ handle: "anillo-luna", qty: 3 }], saleId());
+    });
+
+    it("keys the decrement on the sale's id, so the same sale can never take the stock off twice", async () => {
+      await recordManualSaleAction(form(SALE_FORM));
+
+      expect(decrementStockMock.mock.calls[0][1]).toBe(saleId());
+      expect(decrementStockMock.mock.calls[0][1]).toMatch(/^[A-Za-z0-9_-]+$/);
+    });
+
+    it("sells different quantities of several pieces at once", async () => {
+      await recordManualSaleAction(
+        form({
+          date: TODAY,
+          itemHandle: ["anillo-luna", "aretes-sol"],
+          itemPrice: ["1850", "900"],
+          itemQuantity: ["4", "2"],
+          itemOption: ["", ""],
+          decrementStock: "on",
+        }),
+      );
+
+      expect(decrementStockMock).toHaveBeenCalledWith([
+        { handle: "anillo-luna", qty: 4 },
+        { handle: "aretes-sol", qty: 2 },
+      ], saleId());
+      expect(fake.directChildren("sales")[0].data).toMatchObject({
+        subtotal: 4 * 185_000 + 2 * 90_000,
+      });
+    });
+
+    it("refuses more units than the shop has, recording and decrementing nothing", async () => {
+      // The earrings have 2.
+      const result = await recordManualSaleAction(
+        form({ ...SALE_FORM, itemHandle: "aretes-sol", itemQuantity: "3" }),
+      );
+
+      expect(result).toMatchObject({ ok: false, error: "piece-unavailable" });
+      expect(fake.committed).toHaveLength(0);
+      expect(decrementStockMock).not.toHaveBeenCalled();
+    });
+
+    it("records the quantity but does not touch the store when 'Descontar de la tienda' is off", async () => {
+      const withoutCheckbox: Record<string, string> = { ...THREE_RINGS };
+      delete withoutCheckbox.decrementStock;
+
+      await recordManualSaleAction(form(withoutCheckbox));
+
+      expect(fake.directChildren("sales")[0].data).toMatchObject({
+        items: [{ quantity: 3 }],
+      });
+      expect(decrementStockMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["a zero quantity", "0"],
+      ["a negative quantity", "-1"],
+      ["a fractional quantity", "1.5"],
+      ["an exponent quantity", "1e2"],
+      ["a blank quantity", ""],
+      ["a text quantity", "tres"],
+      ["a quantity above the ceiling", "1000"],
+    ])("rejects %s before the database, naming the field", async (_label, itemQuantity) => {
+      const result = await recordManualSaleAction(form({ ...SALE_FORM, itemQuantity }));
+
+      expect(result).toMatchObject({ ok: false, error: "invalid" });
+      expect(messageOf(result)).toContain("Cantidad");
+      expect(getAdminDbMock).not.toHaveBeenCalled();
+      expect(getCatalogProductsMock).not.toHaveBeenCalled();
+      expect(decrementStockMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a request whose quantities do not line up with its rows, before any data access", async () => {
+      const result = await recordManualSaleAction(
+        form({
+          date: TODAY,
+          itemHandle: ["anillo-luna", "aretes-sol"],
+          itemPrice: ["1850", "900"],
+          itemQuantity: ["1"],
+          itemOption: ["", ""],
+        }),
+      );
+
+      expect(result).toMatchObject({ ok: false, error: "invalid" });
+      expect(getAdminDbMock).not.toHaveBeenCalled();
+      expect(getCatalogProductsMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a request with no quantities at all (an old form), before any data access", async () => {
+      const withoutQuantity: Record<string, string> = { ...SALE_FORM };
+      delete withoutQuantity.itemQuantity;
+
+      const result = await recordManualSaleAction(form(withoutQuantity));
+
+      expect(result).toMatchObject({ ok: false, error: "invalid" });
+      expect(getAdminDbMock).not.toHaveBeenCalled();
+    });
+
+    it("still authorizes first: no data access without an admin", async () => {
+      requireAdminMock.mockRejectedValue(new Error("NEXT_REDIRECT"));
+
+      await expect(recordManualSaleAction(form(THREE_RINGS))).rejects.toThrow("NEXT_REDIRECT");
+      expect(getAdminDbMock).not.toHaveBeenCalled();
+      expect(decrementStockMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("an oversell", () => {
+    const OVERSOLD = {
+      decremented: ["anillo-luna"],
+      missing: [],
+      failed: [],
+      oversold: ["anillo-luna"],
+    };
+
+    it("flags the sale itself 'oversold' and answers a typed warning that NAMES the piece", async () => {
+      decrementStockMock.mockResolvedValue(OVERSOLD);
+
+      const result = await recordManualSaleAction(form(SALE_FORM));
+
+      expect(result).toEqual({
+        ok: true,
+        warning: {
+          code: "oversold",
+          message: expect.stringContaining("«Anillo Luna»"),
+        },
+      });
+      expect(messageOf((result as { warning: unknown }).warning)).toContain(
+        "Revisar: sobreventa",
+      );
+      expect(fake.directChildren("sales")[0].data).toMatchObject({ oversold: true });
+    });
+
+    it("keeps the sale and the warning even if the mark itself cannot be written", async () => {
+      decrementStockMock.mockResolvedValue(OVERSOLD);
+      const run = fake.runTransaction.bind(fake);
+      let calls = 0;
+      vi.spyOn(fake, "runTransaction").mockImplementation(((update: never) => {
+        calls += 1;
+        // The first transaction records the sale; the second flags it.
+        return calls === 1 ? run(update) : Promise.reject(new Error("14 UNAVAILABLE"));
+      }) as FakeFirestore["runTransaction"]);
+
+      const result = await recordManualSaleAction(form(SALE_FORM));
+
+      expect(result).toMatchObject({ ok: true, warning: { code: "oversold" } });
+      expect(fake.directChildren("sales")).toHaveLength(1);
+      expect(fake.directChildren("sales")[0].data).not.toHaveProperty("oversold");
+    });
+
+    it("does not flag a sale that did not go below zero", async () => {
+      await recordManualSaleAction(form(SALE_FORM));
+
+      expect(fake.directChildren("sales")[0].data).not.toHaveProperty("oversold");
+    });
+
+    it("reports a failed piece and an oversold one together, in one message", async () => {
+      decrementStockMock.mockResolvedValue({
+        decremented: ["aretes-sol"],
+        missing: [],
+        failed: ["anillo-luna"],
+        oversold: ["aretes-sol"],
+      });
+
+      const result = await recordManualSaleAction(
+        form({
+          date: TODAY,
+          itemHandle: ["anillo-luna", "aretes-sol"],
+          itemPrice: ["1850", "900"],
+          itemQuantity: ["1", "1"],
+          itemOption: ["", ""],
+          decrementStock: "on",
+        }),
+      );
+
+      const warning = (result as { warning: { code: string; message: string } }).warning;
+      expect(warning.code).toBe("store-not-updated");
+      expect(warning.message).toContain("«Anillo Luna»");
+      expect(warning.message).toContain("«Aretes Sol»");
+      expect(warning.message).toContain("Revisar: sobreventa");
+    });
+  });
+
+  it("records the sale BEFORE taking the units off the stock, never the other way round", async () => {
+    let salesWhenDecremented = -1;
+    decrementStockMock.mockImplementation(async (items: Array<{ handle: string }>) => {
+      salesWhenDecremented = fake.directChildren("sales").length;
+      return {
+        decremented: items.map((item) => item.handle),
+        missing: [],
+        failed: [],
+        oversold: [],
+      };
     });
 
     await recordManualSaleAction(form(SALE_FORM));
 
-    expect(salesWhenMarked).toBe(1);
+    expect(salesWhenDecremented).toBe(1);
   });
 
   describe("expiring the storefront's cached catalog", () => {
-    it("expires the products tag with updateTag, after the piece was marked sold", async () => {
+    it("expires the products tag with updateTag, after the units were taken off", async () => {
       await recordManualSaleAction(form(SALE_FORM));
 
       expect(updateTagMock).toHaveBeenCalledTimes(1);
       expect(updateTagMock).toHaveBeenCalledWith("products");
-      expect(markProductsSoldMock.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(decrementStockMock.mock.invocationCallOrder[0]).toBeLessThan(
         updateTagMock.mock.invocationCallOrder[0],
       );
     });
 
-    it("still expires it when only some of several pieces could be marked", async () => {
+    it("still expires it when only some of several pieces could be updated", async () => {
       vi.spyOn(console, "error").mockImplementation(() => undefined);
-      markProductsSoldMock.mockResolvedValue({
-        marked: ["anillo-luna"],
+      decrementStockMock.mockResolvedValue({
+        decremented: ["anillo-luna"],
         missing: [],
         failed: ["aretes-sol"],
+        oversold: [],
       });
 
       await recordManualSaleAction(
@@ -489,29 +722,36 @@ describe("recordManualSaleAction", () => {
           date: TODAY,
           itemHandle: ["anillo-luna", "aretes-sol"],
           itemPrice: ["1850", "900"],
+          itemQuantity: ["1", "1"],
           itemOption: ["", ""],
-          markSold: "on",
+          decrementStock: "on",
         }),
       );
 
       expect(updateTagMock).toHaveBeenCalledWith("products");
     });
 
-    it("does not expire anything when the piece was not marked sold in the store", async () => {
+    it("does not expire anything when the stock was not taken off in the store", async () => {
       const withoutCheckbox: Record<string, string> = { ...SALE_FORM };
-      delete withoutCheckbox.markSold;
+      delete withoutCheckbox.decrementStock;
 
       await recordManualSaleAction(form(withoutCheckbox));
 
-      expect(markProductsSoldMock).not.toHaveBeenCalled();
+      expect(decrementStockMock).not.toHaveBeenCalled();
       expect(updateTagMock).not.toHaveBeenCalled();
     });
 
     it.each([
-      ["every piece failed", { marked: [], missing: [], failed: ["anillo-luna"] }],
-      ["the product no longer exists", { marked: [], missing: ["anillo-luna"], failed: [] }],
+      [
+        "every piece failed",
+        { decremented: [], missing: [], failed: ["anillo-luna"], oversold: [] },
+      ],
+      [
+        "the product no longer exists",
+        { decremented: [], missing: ["anillo-luna"], failed: [], oversold: [] },
+      ],
     ])("does not expire anything when %s: nothing left the shelf", async (_label, outcome) => {
-      markProductsSoldMock.mockResolvedValue(outcome);
+      decrementStockMock.mockResolvedValue(outcome);
 
       await recordManualSaleAction(form(SALE_FORM));
 
@@ -585,33 +825,40 @@ describe("recordManualSaleAction", () => {
 
       expect(result).toMatchObject({ ok: false, error: "invalid-sale" });
       expect(fake.directChildren("sales")).toHaveLength(0);
-      expect(markProductsSoldMock).not.toHaveBeenCalled();
+      expect(decrementStockMock).not.toHaveBeenCalled();
     });
   });
 
-  it("does not touch the store when 'Marcar como vendida en la tienda' is off", async () => {
+  it("does not touch the store when 'Descontar de la tienda' is off", async () => {
     // An unticked checkbox posts nothing at all.
     const withoutCheckbox: Record<string, string> = { ...SALE_FORM };
-    delete withoutCheckbox.markSold;
+    delete withoutCheckbox.decrementStock;
 
     const result = await recordManualSaleAction(form(withoutCheckbox));
 
     expect(result).toEqual({ ok: true });
     expect(fake.directChildren("sales")).toHaveLength(1);
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
   });
 
-  describe("when pieces cannot be marked sold in the store", () => {
+  describe("when pieces cannot be taken off the stock in the store", () => {
     const TWO_PIECES = {
       date: TODAY,
       itemHandle: ["anillo-luna", "aretes-sol"],
       itemPrice: ["1850", "900"],
+      itemQuantity: ["1", "1"],
       itemOption: ["", ""],
-      markSold: "on",
+      decrementStock: "on",
+    };
+    const FAILED_RING = {
+      decremented: [],
+      missing: [],
+      failed: ["anillo-luna"],
+      oversold: [],
     };
 
     it("records the sale anyway and answers a typed warning that NAMES the piece", async () => {
-      markProductsSoldMock.mockResolvedValue({ marked: [], missing: [], failed: ["anillo-luna"] });
+      decrementStockMock.mockResolvedValue(FAILED_RING);
 
       const result = await recordManualSaleAction(form(SALE_FORM));
 
@@ -631,18 +878,22 @@ describe("recordManualSaleAction", () => {
       ]);
     });
 
-    it("is the same warning when the Sanity write token is missing: markProductsSold reports every piece failed", async () => {
+    it("is the same warning when the Sanity write token is missing: decrementStock reports every piece failed", async () => {
       // The action does not look at the token itself: a missing one comes back
       // as every handle in `failed`, never as a silent no-op.
-      markProductsSoldMock.mockImplementation(async (handles: string[]) => ({
-        marked: [],
+      decrementStockMock.mockImplementation(async (items: Array<{ handle: string }>) => ({
+        decremented: [],
         missing: [],
-        failed: handles,
+        failed: items.map((item) => item.handle),
+        oversold: [],
       }));
 
       const result = await recordManualSaleAction(form(TWO_PIECES));
 
-      expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna", "aretes-sol"]);
+      expect(decrementStockMock).toHaveBeenCalledWith([
+        { handle: "anillo-luna", qty: 1 },
+        { handle: "aretes-sol", qty: 1 },
+      ], saleId());
       const message = messageOf((result as { warning: unknown }).warning);
       expect(message).toContain("«Anillo Luna»");
       expect(message).toContain("«Aretes Sol»");
@@ -650,11 +901,12 @@ describe("recordManualSaleAction", () => {
       expect(fake.directChildren("sales")).toHaveLength(1);
     });
 
-    it("names ONLY the pieces that failed, not the ones that were marked", async () => {
-      markProductsSoldMock.mockResolvedValue({
-        marked: ["anillo-luna"],
+    it("names ONLY the pieces that failed, not the ones that were updated", async () => {
+      decrementStockMock.mockResolvedValue({
+        decremented: ["anillo-luna"],
         missing: [],
         failed: ["aretes-sol"],
+        oversold: [],
       });
 
       const result = await recordManualSaleAction(form(TWO_PIECES));
@@ -667,7 +919,7 @@ describe("recordManualSaleAction", () => {
     });
 
     it("names the piece by its catalog title, never by what the request said", async () => {
-      markProductsSoldMock.mockResolvedValue({ marked: [], missing: [], failed: ["anillo-luna"] });
+      decrementStockMock.mockResolvedValue(FAILED_RING);
 
       const result = await recordManualSaleAction(
         form({ ...SALE_FORM, itemTitle: "Hacked title" }),
@@ -678,15 +930,20 @@ describe("recordManualSaleAction", () => {
       expect(message).not.toContain("Hacked");
     });
 
-    it("does NOT warn about a product that no longer exists: there is nothing to mark", async () => {
-      markProductsSoldMock.mockResolvedValue({ marked: [], missing: ["anillo-luna"], failed: [] });
+    it("does NOT warn about a product that no longer exists: there is nothing to update", async () => {
+      decrementStockMock.mockResolvedValue({
+        decremented: [],
+        missing: ["anillo-luna"],
+        failed: [],
+        oversold: [],
+      });
 
       await expect(recordManualSaleAction(form(SALE_FORM))).resolves.toEqual({ ok: true });
       expect(fake.directChildren("sales")).toHaveLength(1);
     });
 
     it("carries nothing but piece titles: no handle, error or token", async () => {
-      markProductsSoldMock.mockResolvedValue({ marked: [], missing: [], failed: ["anillo-luna"] });
+      decrementStockMock.mockResolvedValue(FAILED_RING);
 
       const result = await recordManualSaleAction(form(SALE_FORM));
 
@@ -694,14 +951,14 @@ describe("recordManualSaleAction", () => {
     });
   });
 
-  it("answers a typed failure for a piece that is already sold, and writes and marks nothing", async () => {
-    stockCatalog([{ ...DEFAULT_CATALOG[0], availability: "sold" }]);
+  it("answers a typed failure for a piece that is already sold out, and writes and decrements nothing", async () => {
+    stockCatalog([{ ...DEFAULT_CATALOG[0], availability: "sold", stock: 0 }]);
 
     const result = await recordManualSaleAction(form(SALE_FORM));
 
     expect(result).toMatchObject({ ok: false, error: "piece-unavailable" });
     expect(fake.committed).toHaveLength(0);
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
@@ -720,6 +977,7 @@ describe("recordManualSaleAction", () => {
         date: TODAY,
         itemHandle: ["anillo-luna", "aretes-sol"],
         itemPrice: ["1850"],
+        itemQuantity: ["1", "1"],
         itemOption: ["", ""],
       }),
     );
@@ -744,6 +1002,7 @@ describe("recordManualSaleAction", () => {
         date: TODAY,
         itemHandle: Array.from({ length: rows }, (_, index) => `pieza-${index}`),
         itemPrice: Array.from({ length: rows }, () => "1"),
+        itemQuantity: Array.from({ length: rows }, () => "1"),
         itemOption: Array.from({ length: rows }, () => ""),
       }),
     );
@@ -759,6 +1018,7 @@ describe("recordManualSaleAction", () => {
         date: TODAY,
         itemHandle: ["anillo-luna", "anillo-luna"],
         itemPrice: ["1", "1"],
+        itemQuantity: ["1", "1"],
         itemOption: ["", ""],
       }),
     );
@@ -791,7 +1051,7 @@ describe("recordManualSaleAction", () => {
     expect(messageOf(result)).toContain(label);
     expect(getAdminDbMock).not.toHaveBeenCalled();
     expect(getCatalogProductsMock).not.toHaveBeenCalled();
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
   });
 
   it("treats a shipping field that was not sent like a blank one: nothing was charged", async () => {
@@ -828,6 +1088,7 @@ describe("recordManualSaleAction", () => {
 
     const [sale] = fake.directChildren("sales");
     expect(JSON.stringify(sale.data)).not.toMatch(/ana@example|Pérez|5512345678|Calle 1/);
+    // No `oversold`: nothing went below zero, so the sale carries no such mark.
     expect(Object.keys(sale.data).sort()).toEqual(
       [
         "actor",
@@ -866,12 +1127,12 @@ describe("voidSaleAction", () => {
     });
   });
 
-  it("never touches the store: the piece is put back on sale in Studio, on purpose", async () => {
+  it("never touches the store: the stock is put back in Studio, on purpose", async () => {
     seedSale("sale1");
 
     await voidSaleAction(form({ saleId: "sale1" }));
 
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
     expect(getCatalogProductsMock).not.toHaveBeenCalled();
   });
 

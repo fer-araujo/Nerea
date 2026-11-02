@@ -40,6 +40,13 @@ const PIECES_PATH = "/admin/piezas";
 const TH_CLASS = cn(LABEL_CLASS, "px-3 py-3 font-normal first:pl-0 last:pr-0");
 const TD_CLASS = "px-3 py-4 align-top first:pl-0 last:pr-0";
 
+// "Agotada" at 0, otherwise how many are left. The table also has the number
+// in its own column; this is the wording under the piece's name.
+function stockLabel(stock: number): string {
+  if (stock <= 0) return "Agotada";
+  return stock === 1 ? "1 disponible" : `${stock} disponibles`;
+}
+
 // `?pieza=` is user-controlled: only a handle that can be a document id is used.
 function parsePieceParam(raw: string | string[] | undefined): string | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -142,14 +149,17 @@ function PiecesTable({
       tabIndex={0}
       className="overflow-x-auto border-y border-line"
     >
-      <table className="w-full min-w-[40rem] border-collapse text-left">
+      <table className="w-full min-w-[44rem] border-collapse text-left">
         <caption className="sr-only">
-          Piezas con su precio, costo, utilidad y margen
+          Piezas con sus piezas disponibles, precio, costo, utilidad y margen
         </caption>
         <thead>
           <tr className="border-b border-line">
             <th scope="col" className={TH_CLASS}>
               Pieza
+            </th>
+            <th scope="col" className={cn(TH_CLASS, "text-right")}>
+              Disponibles
             </th>
             <th scope="col" className={cn(TH_CLASS, "text-right")}>
               Precio
@@ -181,7 +191,7 @@ function PiecesTable({
                   </span>
                   <span className={cn(LABEL_CLASS, "mt-1 block")}>
                     {product.categoryTitle ?? "Sin categoría"} ·{" "}
-                    {product.availability === "sold" ? "Vendida" : "Disponible"}
+                    {stockLabel(product.stock)}
                   </span>
                   {isPieceHandle(product.handle) ? (
                     <Link
@@ -193,6 +203,9 @@ function PiecesTable({
                     </Link>
                   ) : null}
                 </th>
+                <td className={cn(TD_CLASS, NUMBER_CLASS, "text-right text-ink")}>
+                  {product.stock}
+                </td>
                 <td className={cn(TD_CLASS, NUMBER_CLASS, "text-right text-ink")}>
                   {formatMXN(product.price)}
                 </td>

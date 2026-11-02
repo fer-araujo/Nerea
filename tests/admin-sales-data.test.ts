@@ -41,6 +41,7 @@ import {
   SALES_PAGE_SIZE,
   SALES_SUM_LIMIT,
   listSales,
+  markSaleOversold,
   recordManualSale,
   refreshSaleFee,
   sumSales,
@@ -60,6 +61,8 @@ interface CatalogEntry {
   title?: string;
   price?: number;
   availability?: "available" | "sold";
+  /** Pieces left; a one-of-one piece (1) when not given, none when it is sold. */
+  stock?: number;
 }
 
 function stockCatalog(...entries: CatalogEntry[]) {
@@ -73,6 +76,7 @@ function stockCatalog(...entries: CatalogEntry[]) {
           availability: "available",
           categoryTitle: null,
           ...entry,
+          stock: entry.stock ?? (entry.availability === "sold" ? 0 : 1),
         });
       }
     }
@@ -133,11 +137,17 @@ describe("recordManualSale", () => {
     );
 
     // The lines as recorded come back with the id (the action names a piece by
-    // its title if it later fails to mark it sold).
+    // its title if it later fails to update its stock).
     expect(recorded).toEqual({
       id: expect.any(String),
       items: [
-        { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, option: "Talla 7" },
+        {
+          handle: "anillo-luna",
+          title: "Anillo Luna",
+          price: 185_000,
+          quantity: 1,
+          option: "Talla 7",
+        },
       ],
     });
     expect(fake.transactionsRun).toBe(1);
@@ -148,7 +158,13 @@ describe("recordManualSale", () => {
       status: "active",
       date: expect.any(FakeTimestamp),
       items: [
-        { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, option: "Talla 7" },
+        {
+          handle: "anillo-luna",
+          title: "Anillo Luna",
+          price: 185_000,
+          quantity: 1,
+          option: "Talla 7",
+        },
       ],
       subtotal: 185_000,
       shipping: 15_000,
@@ -315,7 +331,9 @@ describe("recordManualSale", () => {
 
     const stored = fake.get(`sales/${recorded?.id}`);
     expect(JSON.stringify(stored)).not.toContain("Hacked");
-    expect(stored?.items).toEqual([{ handle: "anillo-luna", title: "Anillo Luna", price: 1 }]);
+    expect(stored?.items).toEqual([
+      { handle: "anillo-luna", title: "Anillo Luna", price: 1, quantity: 1 },
+    ]);
   });
 
   it("falls back to the handle when the catalog piece has no title", async () => {
@@ -327,8 +345,168 @@ describe("recordManualSale", () => {
     );
 
     expect(fake.get(`sales/${recorded?.id}`)?.items).toEqual([
-      { handle: "sin-titulo", title: "sin-titulo", price: 100 },
+      { handle: "sin-titulo", title: "sin-titulo", price: 100, quantity: 1 },
     ]);
+  });
+
+  describe("quantities", () => {
+    beforeEach(() => {
+      stockCatalog(
+        { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, stock: 5 },
+        { handle: "aretes-sol", title: "Aretes Sol", price: 90_000, stock: 2 },
+      );
+    });
+
+    it("stores each line's quantity; the subtotal is unit price x quantity", async () => {
+      const recorded = await recordManualSale(
+        input({
+          items: [
+            { handle: "anillo-luna", price: 185_000, quantity: 3 },
+            { handle: "aretes-sol", price: 80_000, quantity: 2 },
+          ],
+          shipping: 15_000,
+        }),
+        ACTOR,
+      );
+
+      expect(recorded?.items.map((item) => item.quantity)).toEqual([3, 2]);
+      expect(fake.get(`sales/${recorded?.id}`)).toMatchObject({
+        items: [
+          { handle: "anillo-luna", price: 185_000, quantity: 3 },
+          { handle: "aretes-sol", price: 80_000, quantity: 2 },
+        ],
+        subtotal: 555_000 + 160_000,
+        total: 555_000 + 160_000 + 15_000,
+      });
+    });
+
+    it("freezes the cost as ONE unit's cost times the quantity", async () => {
+      seedCost("anillo-luna"); // 60_000 per unit
+      seedCost("aretes-sol", { metal: 10_000, stones: 0, other: 0 });
+
+      const recorded = await recordManualSale(
+        input({
+          items: [
+            { handle: "anillo-luna", price: 185_000, quantity: 3 },
+            { handle: "aretes-sol", price: 90_000, quantity: 2 },
+          ],
+        }),
+        ACTOR,
+      );
+
+      expect(fake.get(`sales/${recorded?.id}`)).toMatchObject({
+        costOfGoods: 180_000 + 20_000,
+        costPending: false,
+      });
+    });
+
+    it("marks the sale 'costo pendiente' when a multi-quantity piece has no cost", async () => {
+      const recorded = await recordManualSale(
+        input({ items: [{ handle: "anillo-luna", price: 185_000, quantity: 4 }] }),
+        ACTOR,
+      );
+
+      expect(fake.get(`sales/${recorded?.id}`)).toMatchObject({
+        costOfGoods: 0,
+        costPending: true,
+      });
+    });
+
+    it("counts a line without a quantity as one unit", async () => {
+      const recorded = await recordManualSale(input(), ACTOR);
+
+      expect(fake.get(`sales/${recorded?.id}`)).toMatchObject({
+        items: [{ quantity: 1 }],
+        subtotal: 185_000,
+      });
+    });
+
+    it("sells exactly the stock", async () => {
+      const recorded = await recordManualSale(
+        input({ items: [{ handle: "aretes-sol", price: 90_000, quantity: 2 }] }),
+        ACTOR,
+      );
+
+      expect(recorded).not.toBeNull();
+    });
+
+    it("refuses more units than the shop has, writing nothing", async () => {
+      const error = await errorOf(
+        recordManualSale(
+          input({ items: [{ handle: "aretes-sol", price: 90_000, quantity: 3 }] }),
+          ACTOR,
+        ),
+      );
+
+      expect((error as SalesError).code).toBe("piece-unavailable");
+      expect(fake.committed).toHaveLength(0);
+    });
+
+    it("refuses the WHOLE sale when only one line asks for too many", async () => {
+      const error = await errorOf(
+        recordManualSale(
+          input({
+            items: [
+              { handle: "anillo-luna", price: 185_000, quantity: 5 },
+              { handle: "aretes-sol", price: 90_000, quantity: 3 },
+            ],
+          }),
+          ACTOR,
+        ),
+      );
+
+      expect((error as SalesError).code).toBe("piece-unavailable");
+      expect(fake.committed).toHaveLength(0);
+    });
+
+    it.each([0, -1, 1.5, Number.NaN, 1000])(
+      "refuses a quantity of %j before reading anything",
+      async (quantity) => {
+        const error = await errorOf(
+          recordManualSale(
+            input({ items: [{ handle: "anillo-luna", price: 100, quantity }] }),
+            ACTOR,
+          ),
+        );
+
+        expect((error as SalesError).code).toBe("invalid-sale");
+        expect(getCatalogProductsMock).not.toHaveBeenCalled();
+        expect(fake.transactionsRun).toBe(0);
+      },
+    );
+
+    it("counts the quantity when it checks the commission against what the customer paid", async () => {
+      // 3 x 100_000 = 300_000 paid: a 250_000 commission fits, 300_001 does not.
+      const fits = await recordManualSale(
+        input({
+          items: [{ handle: "anillo-luna", price: 100_000, quantity: 3 }],
+          terminalFee: 250_000,
+        }),
+        ACTOR,
+      );
+      const error = await errorOf(
+        recordManualSale(
+          input({
+            items: [{ handle: "anillo-luna", price: 100_000, quantity: 3 }],
+            terminalFee: 300_001,
+          }),
+          ACTOR,
+        ),
+      );
+
+      expect(fits).not.toBeNull();
+      expect((error as SalesError).code).toBe("invalid-sale");
+    });
+
+    it("does not touch the stock: that is the caller's decision, in another system", async () => {
+      await recordManualSale(
+        input({ items: [{ handle: "anillo-luna", price: 185_000, quantity: 2 }] }),
+        ACTOR,
+      );
+
+      // The catalog is only READ (one call); there is no write path in this module.
+      expect(getCatalogProductsMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("omits the option, the note and the shipping it was not given instead of storing undefined", async () => {
@@ -924,7 +1102,16 @@ describe("listSales", () => {
       source: "stripe",
       status: "active",
       date: new Date("2026-10-05T18:00:00Z"),
-      items: [{ handle: "anillo-luna", title: "Anillo Luna", price: 185_000, option: "Talla 7" }],
+      // A sale from before quantities existed has none: its line counts once.
+      items: [
+        {
+          handle: "anillo-luna",
+          title: "Anillo Luna",
+          price: 185_000,
+          quantity: 1,
+          option: "Talla 7",
+        },
+      ],
       subtotal: 185_000,
       shipping: 15_000,
       total: 200_000,
@@ -936,6 +1123,7 @@ describe("listSales", () => {
       fee: 0,
       feePending: true,
       net: null,
+      oversold: false,
       note: "Hola",
     });
     expect(page?.sales[1]).toEqual({
@@ -943,7 +1131,7 @@ describe("listSales", () => {
       source: "manual",
       status: "active",
       date: new Date("2026-10-04T18:00:00Z"),
-      items: [{ handle: "", title: "", price: 0 }],
+      items: [{ handle: "", title: "", price: 0, quantity: 1 }],
       subtotal: 0,
       shipping: 0,
       total: 0,
@@ -953,8 +1141,37 @@ describe("listSales", () => {
       fee: 0,
       feePending: false,
       net: null,
+      oversold: false,
       note: null,
     });
+  });
+
+  it("maps the quantity and the oversold mark of a sale, coercing a hand-edited quantity to one", async () => {
+    seedSale("multi", {
+      items: [
+        { handle: "anillo-luna", title: "Anillo Luna", price: 100_000, quantity: 3 },
+        { handle: "a", title: "A", price: 1, quantity: 0 },
+        { handle: "b", title: "B", price: 1, quantity: 1.5 },
+        { handle: "c", title: "C", price: 1, quantity: "2" },
+      ],
+      subtotal: 300_003,
+      oversold: true,
+    });
+    seedSale("tidy", { oversold: "yes" });
+
+    const page = await listSales(OCTOBER);
+
+    expect(page?.sales.find((sale) => sale.id === "multi")).toMatchObject({
+      items: [
+        { handle: "anillo-luna", quantity: 3 },
+        { handle: "a", quantity: 1 },
+        { handle: "b", quantity: 1 },
+        { handle: "c", quantity: 1 },
+      ],
+      oversold: true,
+    });
+    // Only a literal true counts: a hand-edited value is not a flag.
+    expect(page?.sales.find((sale) => sale.id === "tidy")?.oversold).toBe(false);
   });
 
   describe("livemode and commissions", () => {
@@ -1316,5 +1533,49 @@ describe("sumSales (period totals)", () => {
     configured = false;
 
     await expect(sumSales(OCTOBER)).resolves.toBeNull();
+  });
+});
+
+describe("markSaleOversold", () => {
+  it("flags the sale and changes nothing else on it", async () => {
+    fake.seed("sales/venta-1", { source: "manual", total: 185_000, items: [] });
+
+    await expect(markSaleOversold("venta-1")).resolves.toBe(true);
+
+    expect(fake.get("sales/venta-1")).toEqual({
+      source: "manual",
+      total: 185_000,
+      items: [],
+      oversold: true,
+    });
+  });
+
+  it("is harmless to repeat", async () => {
+    fake.seed("sales/venta-1", { source: "manual", oversold: true });
+
+    await markSaleOversold("venta-1");
+    await markSaleOversold("venta-1");
+
+    expect(fake.get("sales/venta-1")).toEqual({ source: "manual", oversold: true });
+  });
+
+  it("rejects with sale-not-found for a sale that does not exist, writing nothing", async () => {
+    const error = await errorOf(markSaleOversold("fantasma"));
+
+    expect((error as SalesError).code).toBe("sale-not-found");
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("rejects an id that could address another path, before touching the database", async () => {
+    const error = await errorOf(markSaleOversold("a/b"));
+
+    expect((error as SalesError).code).toBe("sale-not-found");
+    expect(fake.transactionsRun).toBe(0);
+  });
+
+  it("returns false when Firebase isn't configured", async () => {
+    configured = false;
+
+    await expect(markSaleOversold("venta-1")).resolves.toBe(false);
   });
 });

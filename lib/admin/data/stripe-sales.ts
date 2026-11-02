@@ -8,12 +8,11 @@ import {
   type SaleItem,
 } from "@/lib/admin/domain/sales";
 import { commerce } from "@/lib/commerce";
+import { formatOptionLabel, validateOption } from "@/lib/commerce/options";
 import {
-  formatOptionLabel,
-  parseSerializedOptions,
-  validateOption,
-} from "@/lib/commerce/options";
-import { parseHandles } from "@/lib/commerce/stripe/metadata";
+  readSessionItems,
+  type SessionItem,
+} from "@/lib/commerce/stripe/metadata";
 import { readPieceCostTotals } from "./pieces";
 import { buildSaleDocument } from "./sale-document";
 import { COLLECTIONS, isAlreadyExistsError, isDocumentId } from "./shared";
@@ -51,7 +50,11 @@ export interface StripeSaleSession {
   /** Centavos, what the customer paid. */
   amount_total?: number | null;
   shipping_cost?: { amount_total?: number | null } | null;
-  /** `handles` (comma list) and `options` (`handle:size=7` pairs). */
+  /**
+   * `items` (`handle*2|size=7;…`), the authoritative list; `handles` (comma
+   * list) and `options` (`handle:size=7` pairs) for sessions that predate
+   * quantities. Read through `readSessionItems`.
+   */
   metadata?: Record<string, string> | null;
 }
 
@@ -74,41 +77,45 @@ function asCentavos(value: unknown): number | null {
 }
 
 /**
- * One line per purchased piece. Title and price come from the catalog (the
- * price is the one the checkout charged: base price plus the catalog's own
- * surcharge for the chosen option, exactly as lib/cart/checkout.ts computes
- * it); the option is what the shopper picked, from `metadata.options`. A
- * piece the catalog no longer knows is kept with its handle as title and
- * price 0 rather than dropped: the money is on the sale's own totals.
- * Rejects if the catalog can't be read, so the webhook can answer 500 and let
- * Stripe retry instead of recording a sale with guessed titles.
+ * One line per purchased (piece, option) with its quantity. Title and UNIT
+ * price come from the catalog (the price is the one the checkout charged: base
+ * price plus the catalog's own surcharge for the chosen option, exactly as
+ * lib/cart/checkout.ts computes it); the option is what the shopper picked,
+ * from `metadata.items`. A piece the catalog no longer knows is kept with its
+ * handle as title and price 0 rather than dropped: the money is on the sale's
+ * own totals. Rejects if the catalog can't be read, so the webhook can answer
+ * 500 and let Stripe retry instead of recording a sale with guessed titles.
  */
-async function buildItems(
-  handles: readonly string[],
-  rawOptions: string | undefined,
-): Promise<SaleItem[]> {
-  const options = parseSerializedOptions(rawOptions);
-
-  return Promise.all(
-    handles.map(async (handle) => {
-      const product = await commerce.getProductByHandle(handle, "es");
-      const option = options.get(handle);
-
-      let price = 0;
-      if (product) {
-        const check = option ? validateOption(product.options, option) : null;
-        const base = asCentavos(product.price.amount) ?? 0;
-        price = base + (check?.valid ? check.extra : 0);
-      }
-
-      return {
-        handle,
-        title: product?.title || handle,
-        price,
-        ...(option ? { option: formatOptionLabel(option, "es") } : {}),
-      };
-    }),
+async function buildItems(items: readonly SessionItem[]): Promise<SaleItem[]> {
+  // One catalog read per piece, however many lines (sizes) it has.
+  const handles = [...new Set(items.map((item) => item.handle))];
+  const products = new Map(
+    await Promise.all(
+      handles.map(
+        async (handle) =>
+          [handle, await commerce.getProductByHandle(handle, "es")] as const,
+      ),
+    ),
   );
+
+  return items.map(({ handle, quantity, option }) => {
+    const product = products.get(handle) ?? null;
+
+    let price = 0;
+    if (product) {
+      const check = option ? validateOption(product.options, option) : null;
+      const base = asCentavos(product.price.amount) ?? 0;
+      price = base + (check?.valid ? check.extra : 0);
+    }
+
+    return {
+      handle,
+      title: product?.title || handle,
+      price,
+      quantity,
+      ...(option ? { option: formatOptionLabel(option, "es") } : {}),
+    };
+  });
 }
 
 /**
@@ -120,8 +127,9 @@ async function buildItems(
  *
  * The totals are the session's own (`amount_subtotal`, `shipping_cost`,
  * `amount_total`): what the customer really paid, not a recomputation. The
- * cost of goods is frozen from `pieces/{handle}` in the same transaction that
- * creates the sale; a piece with no cost recorded marks it `costPending`.
+ * cost of goods (one unit's cost times the quantity of each line) is frozen
+ * from `pieces/{handle}` in the same transaction that creates the sale; a piece
+ * with no cost recorded marks it `costPending`.
  *
  * The sale also freezes Stripe's own fee and net for the payment, read from the
  * session's balance transaction BEFORE the create (see stripe-fees.ts). When
@@ -147,15 +155,16 @@ export async function recordStripeSale(
 
   const sessionId = session.id;
   const saleId = `stripe_${sessionId ?? ""}`;
-  const handles = [...new Set(parseHandles(session.metadata?.handles))];
-  if (!sessionId || !isDocumentId(saleId) || handles.length === 0) {
+  const sessionItems = readSessionItems(session.metadata);
+  if (!sessionId || !isDocumentId(saleId) || sessionItems.length === 0) {
     return "skipped";
   }
+  const handles = [...new Set(sessionItems.map((item) => item.handle))];
 
   // Independent reads, so they run together. `fetchStripeFees` never rejects:
   // it answers `null` for a fee that is not available.
   const [items, fees] = await Promise.all([
-    buildItems(handles, session.metadata?.options),
+    buildItems(sessionItems),
     fetchStripeFees(sessionId),
   ]);
   const livemode = resolveLivemode(session.livemode, sessionId);
@@ -172,7 +181,7 @@ export async function recordStripeSale(
     await db.runTransaction(async (tx) => {
       // Transactions need every read before the first write.
       const { costOfGoods, costPending } = costSnapshot(
-        handles,
+        items,
         await readPieceCostTotals(db, tx, handles),
       );
 
@@ -203,4 +212,69 @@ export async function recordStripeSale(
   }
 
   return "recorded";
+}
+
+// ---- stock progress ---------------------------------------------------------
+//
+// The webhook takes the units off the shop's stock (Sanity) AFTER the sale
+// exists. What keeps a redelivery from taking them off twice is NOT here: it is
+// the marker documents `decrementStock` creates in the same Sanity transaction
+// as each decrement (lib/commerce/sanity/stock.ts). `stockApplied: true` on the
+// sale is a shortcut and a record for the admin: every unit of the session is
+// off the stock, so a redelivery need not even ask Sanity.
+
+/** How far the stock of one Stripe sale has been applied. */
+export interface StripeSaleStock {
+  /** Every unit of the session is off the stock. */
+  applied: boolean;
+}
+
+/**
+ * Reads the stock progress of the sale of `sessionId`. `null` when there is no
+ * such sale (or Firebase isn't configured), which a caller treats as "nothing
+ * applied". A Firestore failure rejects.
+ */
+export async function readStripeSaleStock(
+  sessionId: string,
+): Promise<StripeSaleStock | null> {
+  const db = getAdminDb();
+  const saleId = `stripe_${sessionId}`;
+  if (!db || !isDocumentId(saleId)) {
+    return null;
+  }
+
+  const snapshot = await db.collection(COLLECTIONS.sales).doc(saleId).get();
+  if (!snapshot.exists) {
+    return null;
+  }
+  return { applied: snapshot.data()?.stockApplied === true };
+}
+
+/**
+ * Stores the stock progress on the sale of `sessionId`, and flags it
+ * `oversold` when more units were sold than the shop had ("Revisar:
+ * sobreventa"; never cleared here). Rejects when the sale doesn't exist or
+ * Firestore fails, which the webhook answers with a 500.
+ */
+export async function saveStripeSaleStock(
+  sessionId: string,
+  progress: { applied: boolean; oversold: boolean },
+): Promise<void> {
+  const db = getAdminDb();
+  const saleId = `stripe_${sessionId}`;
+  if (!db || !isDocumentId(saleId)) {
+    throw new Error("The sale ledger is not available.");
+  }
+
+  const ref = db.collection(COLLECTIONS.sales).doc(saleId);
+  await db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(ref);
+    if (!snapshot.exists) {
+      throw new Error("The sale does not exist.");
+    }
+    tx.update(ref, {
+      stockApplied: progress.applied,
+      ...(progress.oversold ? { oversold: true } : {}),
+    });
+  });
 }

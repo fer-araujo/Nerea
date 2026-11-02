@@ -1,6 +1,7 @@
 import { serializeOption } from "../options";
 import type { Locale, SelectedOption } from "../types";
 import { getStripeClient } from "./client";
+import { METADATA_VALUE_MAX, serializeItems, type SessionItem } from "./metadata";
 
 // SECURITY: every field here MUST be resolved server-side from
 // `commerce.getProductByHandle` (see lib/cart/checkout.ts's `checkoutAction`,
@@ -12,6 +13,7 @@ export interface CheckoutLineInput {
   name: string;
   /** Minor units (centavos) — matches the domain `Money.amount` directly. */
   amount: number;
+  /** Units of this line: a positive whole number, already checked against the live stock. */
   quantity: number;
 }
 
@@ -58,19 +60,27 @@ export interface CreateCheckoutSessionOptions {
    * tail is harmless because the option is also in the line item's name.
    */
   options?: CheckoutOptionInput[];
+  /**
+   * What was bought, one entry per (piece, option) line with its quantity,
+   * attached as `metadata.items` (`handle*2|size=7;handle2*1`, see
+   * `serializeItems`). It is what the webhook sells from; `handles` is kept
+   * beside it for sessions that predate quantities. Like `handles` it is never
+   * truncated: over the 500-char cap `createCheckoutSession` throws instead, so
+   * a paid unit can never go missing from the stock count.
+   */
+  items?: SessionItem[];
 }
 
-// Stripe caps a metadata value at 500 chars. A one-of-one cart is a handful of
-// short slugs at most, so hitting this is not an expected path. The two values
-// are NOT equally safe to cut, though:
-// - `handles` must never be truncated. The webhook marks sold ONLY the handles
-//   it finds in `metadata.handles`, so a silently dropped handle would leave a
-//   PAID one-of-one piece purchasable again (a double sale). It fails closed
+// Stripe caps a metadata value at 500 chars (METADATA_VALUE_MAX). A cart is a
+// handful of short slugs at most, so hitting this is not an expected path. The
+// values are NOT equally safe to cut, though:
+// - `handles` and `items` must never be truncated. The webhook takes units off
+//   the stock ONLY for what it finds there, so a silently dropped entry would
+//   leave PAID pieces purchasable again (an oversell). They fail closed
 //   instead: createCheckoutSession throws, and the caller collapses that into
 //   a retryable result.
 // - `options` is informational (what to size or cut) and the chosen option is
 //   also part of the line item's name, so cutting it loses nothing critical.
-const METADATA_VALUE_MAX = 500;
 
 // Shown on Stripe's hosted checkout page, so it is localized here: this module
 // runs on the server where next-intl's client messages are not at hand.
@@ -98,6 +108,7 @@ export async function createCheckoutSession(
     locale,
     handles,
     options,
+    items,
   }: CreateCheckoutSessionOptions,
 ): Promise<string> {
   const stripe = getStripeClient();
@@ -119,6 +130,14 @@ export async function createCheckoutSession(
       throw new Error("Purchased handles exceed Stripe's metadata limit.");
     }
     metadata.handles = joinedHandles;
+  }
+  if (items && items.length > 0) {
+    const serializedItems = serializeItems(items);
+    // Same fail-closed rule as the handles: nothing is created or charged.
+    if (serializedItems.length > METADATA_VALUE_MAX) {
+      throw new Error("Purchased items exceed Stripe's metadata limit.");
+    }
+    metadata.items = serializedItems;
   }
   if (options && options.length > 0) {
     metadata.options = options

@@ -10,6 +10,7 @@ import {
   SALE_STATUSES,
   SalesError,
   costSnapshot,
+  isSaleQuantity,
   isVoidableSale,
   itemsSubtotal,
   resolveLivemode,
@@ -33,6 +34,7 @@ import {
   readEnum,
   readOptionalCentavos,
   readOptionalString,
+  readQuantity,
   readString,
   toDate,
 } from "./shared";
@@ -56,8 +58,13 @@ export const SALES_SUM_LIMIT = 2000;
 
 export interface ManualSaleItemInput {
   handle: string;
-  /** What it sold for, integer centavos (may be below the catalog price). */
+  /** What ONE unit sold for, integer centavos (may be below the catalog price). */
   price: number;
+  /**
+   * Units sold, a whole number from 1 (1 when omitted). It can not be more than
+   * the piece has in stock.
+   */
+  quantity?: number;
   /** Free text: "Talla 7", "Cadena 45 cm". */
   option?: string;
 }
@@ -79,15 +86,16 @@ export interface RecordManualSaleInput {
 
 /**
  * Records a sale made outside the online shop. The pieces must exist in the
- * catalog and still be available, and their TITLES come from the catalog,
- * never from the caller. The cost of the sale is frozen in the same
- * transaction that writes it (from `pieces/{handle}`; a piece with no cost
- * recorded makes the sale "costo pendiente"), and so is the audit entry.
+ * catalog and the shop must have at least as many units as are being sold, and
+ * their TITLES come from the catalog, never from the caller. The cost of the
+ * sale (one unit's cost times the quantity) is frozen in the same transaction
+ * that writes it (from `pieces/{handle}`; a piece with no cost recorded makes
+ * the sale "costo pendiente"), and so is the audit entry.
  *
- * It does NOT mark anything sold in Sanity: that is a write to another system
- * with its own failure modes, so the caller decides (see the action). The
- * lines as recorded come back with the id, so the caller can name a piece by
- * its title if it later fails to mark it.
+ * It does NOT take anything off the stock in Sanity: that is a write to another
+ * system with its own failure modes, so the caller decides (see the action).
+ * The lines as recorded come back with the id, so the caller can name a piece
+ * by its title if it later fails to update it.
  *
  * Rejects with a SalesError ("invalid-sale", "piece-not-found",
  * "piece-unavailable") or an InventoryError "invalid-cost"; returns `null`
@@ -111,6 +119,9 @@ export async function recordManualSale(
     }
     if (!isCentavos(item.price)) {
       throw new InventoryError("invalid-cost");
+    }
+    if (item.quantity !== undefined && !isSaleQuantity(item.quantity)) {
+      throw new SalesError("invalid-sale");
     }
   }
   if (!isCentavos(input.shipping)) {
@@ -137,13 +148,17 @@ export async function recordManualSale(
     if (!product) {
       throw new SalesError("piece-not-found");
     }
-    if (product.availability !== "available") {
+    const quantity = item.quantity ?? 1;
+    // Selling more units than the shop has is refused like selling a piece
+    // that is gone: the stock would have to go below zero.
+    if (product.availability !== "available" || quantity > product.stock) {
       throw new SalesError("piece-unavailable");
     }
     return {
       handle: item.handle,
       title: product.title || item.handle,
       price: item.price,
+      quantity,
       ...(item.option ? { option: item.option } : {}),
     };
   });
@@ -152,7 +167,7 @@ export async function recordManualSale(
   return db.runTransaction(async (tx) => {
     // Transactions need every read before the first write.
     const { costOfGoods, costPending } = costSnapshot(
-      handles,
+      items,
       await readPieceCostTotals(db, tx, handles),
     );
 
@@ -182,6 +197,34 @@ export async function recordManualSale(
 
     return { id: saleRef.id, items };
   });
+}
+
+/**
+ * Flags a sale "Revisar: sobreventa": more units were sold than the shop had.
+ * The flag only ever goes on (nothing here clears it) and nothing else on the
+ * sale changes. Called by the manual-sale action when taking the units off the
+ * stock reported an oversell; the Stripe webhook sets the same flag through
+ * stripe-sales.ts. Returns `false` when Firebase isn't configured; rejects with
+ * a SalesError "sale-not-found" for an unknown sale.
+ */
+export async function markSaleOversold(id: string): Promise<boolean> {
+  if (!isDocumentId(id)) {
+    throw new SalesError("sale-not-found");
+  }
+
+  const db = getAdminDb();
+  if (!db) {
+    return false;
+  }
+
+  const ref = db.collection(COLLECTIONS.sales).doc(id);
+  await db.runTransaction(async (tx) => {
+    if (!(await tx.get(ref)).exists) {
+      throw new SalesError("sale-not-found");
+    }
+    tx.update(ref, { oversold: true });
+  });
+  return true;
 }
 
 /**
@@ -337,6 +380,8 @@ export interface Sale {
   feePending: boolean;
   /** What Stripe deposits for the sale (charged minus fee), once known. */
   net: number | null;
+  /** More units were sold than the shop had: "Revisar: sobreventa". */
+  oversold: boolean;
   note: string | null;
 }
 
@@ -360,6 +405,8 @@ function toSaleItem(raw: unknown): SaleItem | null {
     handle: readString(item.handle),
     title: readString(item.title),
     price: readCentavos(item.price),
+    // A sale from before quantities existed has none: its lines count once.
+    quantity: readQuantity(item.quantity),
     ...(option ? { option } : {}),
   };
 }
@@ -392,6 +439,7 @@ function toSale(doc: DocumentSnapshot): Sale {
     fee: figures.fee,
     feePending: figures.feePending,
     net: source === "stripe" ? readOptionalCentavos(data.stripeNet) : null,
+    oversold: data.oversold === true,
     note: readOptionalString(data.note),
   };
 }

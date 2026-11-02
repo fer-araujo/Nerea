@@ -25,8 +25,10 @@ import { recordManualSaleAction } from "./actions";
 export interface SalePiece {
   handle: string;
   title: string;
-  /** The catalog price, integer centavos: the form's starting price. */
+  /** The catalog price of ONE unit, integer centavos: the form's starting price. */
   price: number;
+  /** Units the shop has left (>= 1): the most one row can sell. */
+  stock: number;
 }
 
 interface Row {
@@ -34,13 +36,21 @@ interface Row {
   key: number;
   handle: string;
   price: string;
+  quantity: string;
   option: string;
 }
 
 const MONEY_PATTERN = /^\d{1,8}(?:\.\d{1,2})?$/;
+const QUANTITY_PATTERN = /^\d{1,6}$/;
 
 function emptyRow(key: number): Row {
-  return { key, handle: "", price: "", option: "" };
+  return { key, handle: "", price: "", quantity: "1", option: "" };
+}
+
+/** What the live total counts: only a quantity that is already valid. */
+function toQuantity(text: string): number {
+  const trimmed = text.trim();
+  return QUANTITY_PATTERN.test(trimmed) ? Number(trimmed) : 0;
 }
 
 /** What the live total counts: only an amount that is already valid. */
@@ -50,8 +60,9 @@ function toCentavos(text: string): number {
 }
 
 // Records a sale made outside the online shop. A client island ONLY for the
-// piece rows (each starts at the catalog price, editable for a discount), the
-// live total and the typed result — the server action authorizes, validates
+// piece rows (each starts at the catalog price of one unit, editable for a
+// discount, times a quantity that can not pass the piece's stock), the live
+// total and the typed result — the server action authorizes, validates
 // every field again, takes titles and availability from the catalog and does
 // the real write (see actions.ts). The total shown here is a convenience,
 // never what gets stored.
@@ -64,7 +75,7 @@ export function ManualSaleForm({
   today: string;
 }) {
   const { result, pending, submit } = useAdminAction(recordManualSaleAction);
-  const markSoldHintId = useId();
+  const decrementHintId = useId();
   const noteHintId = useId();
   const terminalFeeHintId = useId();
   const nextKey = useRef(1);
@@ -73,10 +84,13 @@ export function ManualSaleForm({
   const [shipping, setShipping] = useState("");
   const [terminalFee, setTerminalFee] = useState("");
   const [note, setNote] = useState("");
-  const [markSold, setMarkSold] = useState(true);
+  const [decrementStock, setDecrementStock] = useState(true);
 
   const maxRows = Math.min(MAX_SALE_ITEMS, pieces.length);
-  const subtotal = rows.reduce((sum, row) => sum + toCentavos(row.price), 0);
+  const subtotal = rows.reduce(
+    (sum, row) => sum + toCentavos(row.price) * toQuantity(row.quantity),
+    0,
+  );
   const total = subtotal + toCentavos(shipping);
 
   function updateRow(key: number, patch: Partial<Omit<Row, "key">>) {
@@ -85,12 +99,14 @@ export function ManualSaleForm({
     );
   }
 
-  // Choosing a piece starts the price at the catalog's; the admin may lower it.
+  // Choosing a piece starts the price at the catalog's and the quantity at one;
+  // the admin may lower the price and raise the quantity (up to the stock).
   function choosePiece(key: number, handle: string) {
     const piece = pieces.find((candidate) => candidate.handle === handle);
     updateRow(key, {
       handle,
       price: piece ? centavosToPesosText(piece.price) : "",
+      quantity: "1",
     });
   }
 
@@ -119,7 +135,7 @@ export function ManualSaleForm({
       setShipping("");
       setTerminalFee("");
       setNote("");
-      setMarkSold(true);
+      setDecrementStock(true);
     });
   }
 
@@ -191,6 +207,9 @@ export function ManualSaleForm({
               .filter((other) => other.key !== row.key && other.handle !== "")
               .map((other) => other.handle),
           );
+          // The most this row can sell: what the chosen piece has left.
+          const maxQuantity =
+            pieces.find((piece) => piece.handle === row.handle)?.stock ?? 1;
 
           return (
             <li key={row.key} className="border border-line bg-bone-raised p-4">
@@ -201,7 +220,7 @@ export function ManualSaleForm({
                   Pieza {index + 1}
                 </legend>
 
-                <div className="grid gap-4 sm:grid-cols-[2fr_1fr_1fr]">
+                <div className="grid gap-4 sm:grid-cols-[2fr_1fr_1fr_1fr]">
                   <label className={FIELD_CLASS}>
                     <span className={LABEL_CLASS}>Pieza</span>
                     <select
@@ -220,13 +239,35 @@ export function ManualSaleForm({
                         .map((piece) => (
                           <option key={piece.handle} value={piece.handle}>
                             {piece.title || piece.handle}
+                            {piece.stock > 1
+                              ? ` (${piece.stock} disponibles)`
+                              : ""}
                           </option>
                         ))}
                     </select>
                   </label>
 
                   <label className={FIELD_CLASS}>
-                    <span className={LABEL_CLASS}>Precio (MXN)</span>
+                    <span className={LABEL_CLASS}>Cantidad</span>
+                    <input
+                      type="number"
+                      name="itemQuantity"
+                      required
+                      min="1"
+                      max={maxQuantity}
+                      step="1"
+                      inputMode="numeric"
+                      value={row.quantity}
+                      onChange={(event) =>
+                        updateRow(row.key, { quantity: event.target.value })
+                      }
+                      disabled={pending}
+                      className={INPUT_CLASS}
+                    />
+                  </label>
+
+                  <label className={FIELD_CLASS}>
+                    <span className={LABEL_CLASS}>Precio por pieza (MXN)</span>
                     <input
                       type="number"
                       name="itemPrice"
@@ -309,17 +350,18 @@ export function ManualSaleForm({
         <label className="flex min-h-11 items-center gap-3 font-sans text-sm text-ink">
           <input
             type="checkbox"
-            name="markSold"
-            checked={markSold}
-            onChange={(event) => setMarkSold(event.target.checked)}
-            aria-describedby={markSoldHintId}
+            name="decrementStock"
+            checked={decrementStock}
+            onChange={(event) => setDecrementStock(event.target.checked)}
+            aria-describedby={decrementHintId}
             disabled={pending}
             className="size-5 shrink-0 accent-ink"
           />
-          Marcar como vendida en la tienda
+          Descontar de la tienda
         </label>
-        <p id={markSoldHintId} className="text-sm leading-relaxed text-graphite">
-          Quita la pieza de la tienda en línea para que nadie más la compre.
+        <p id={decrementHintId} className="text-sm leading-relaxed text-graphite">
+          Resta las piezas vendidas de las disponibles en la tienda en línea. Si
+          era la última, la pieza queda agotada y nadie más la puede comprar.
         </p>
       </div>
 

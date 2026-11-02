@@ -57,6 +57,7 @@ function product(overrides: Record<string, unknown> = {}) {
     title: "Anillo Luna",
     price: 400_000,
     availability: "available",
+    stock: 1,
     categoryTitle: "Anillos",
     ...overrides,
   };
@@ -100,12 +101,40 @@ describe("Piezas page", () => {
     expect(within(row).getByText("$2,500.00")).toBeInTheDocument();
     expect(within(row).getByText("62.5 %")).toBeInTheDocument();
     expect(within(row).queryByText("Costo pendiente")).not.toBeInTheDocument();
-    expect(within(row).getByText(/Anillos · Disponible/)).toBeInTheDocument();
+    expect(within(row).getByText(/Anillos · 1 disponible/)).toBeInTheDocument();
+  });
+
+  it("shows how many pieces are left in their own column, and in words under the name", async () => {
+    listCatalogMock.mockResolvedValue({
+      products: [
+        product({ handle: "serie", title: "Anillo Serie", stock: 4 }),
+        product({ handle: "unica", title: "Anillo Único", stock: 1 }),
+      ],
+      truncated: false,
+    });
+
+    await renderPage();
+
+    expect(screen.getByRole("columnheader", { name: "Disponibles" })).toBeInTheDocument();
+    const serie = screen.getByRole("row", { name: /Anillo Serie/ });
+    expect(within(serie).getByText(/Anillos · 4 disponibles/)).toBeInTheDocument();
+    expect(within(serie).getByRole("cell", { name: "4" })).toBeInTheDocument();
+    const unica = screen.getByRole("row", { name: /Anillo Único/ });
+    expect(within(unica).getByRole("cell", { name: "1" })).toBeInTheDocument();
   });
 
   it("shows 'Costo pendiente' and no margin for a piece with no cost recorded", async () => {
     listCatalogMock.mockResolvedValue({
-      products: [product({ handle: "aretes-sol", title: "Aretes Sol", price: 90_000, availability: "sold", categoryTitle: null })],
+      products: [
+        product({
+          handle: "aretes-sol",
+          title: "Aretes Sol",
+          price: 90_000,
+          availability: "sold",
+          stock: 0,
+          categoryTitle: null,
+        }),
+      ],
       truncated: false,
     });
 
@@ -114,7 +143,8 @@ describe("Piezas page", () => {
     const row = screen.getByRole("row", { name: /Aretes Sol/ });
     expect(within(row).getByText("Costo pendiente")).toBeInTheDocument();
     expect(within(row).getAllByText("—")).toHaveLength(2);
-    expect(within(row).getByText(/Sin categoría · Vendida/)).toBeInTheDocument();
+    expect(within(row).getByText(/Sin categoría · Agotada/)).toBeInTheDocument();
+    expect(within(row).getByRole("cell", { name: "0" })).toBeInTheDocument();
   });
 
   it("shows a margin below zero when the piece costs more than it sells for", async () => {
@@ -258,7 +288,15 @@ describe("Ventas page", () => {
       source: "manual",
       status: "active",
       date: new Date("2026-10-05T18:00:00Z"),
-      items: [{ handle: "anillo-luna", title: "Anillo Luna", price: 185_000, option: "Talla 7" }],
+      items: [
+        {
+          handle: "anillo-luna",
+          title: "Anillo Luna",
+          price: 185_000,
+          quantity: 1,
+          option: "Talla 7",
+        },
+      ],
       subtotal: 185_000,
       shipping: 15_000,
       total: 200_000,
@@ -268,6 +306,7 @@ describe("Ventas page", () => {
       fee: 0,
       feePending: false,
       net: null,
+      oversold: false,
       note: null,
       ...overrides,
     };
@@ -363,8 +402,8 @@ describe("Ventas page", () => {
           id: "stripe_cs_1",
           source: "stripe",
           items: [
-            { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, option: "Talla 7" },
-            { handle: "aretes-sol", title: "Aretes Sol", price: 90_000 },
+            { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, quantity: 1, option: "Talla 7" },
+            { handle: "aretes-sol", title: "Aretes Sol", price: 90_000, quantity: 1 },
           ],
           subtotal: 275_000,
           total: 290_000,
@@ -388,6 +427,48 @@ describe("Ventas page", () => {
     expect(row.getByText("Envío $150.00")).toBeInTheDocument();
     expect(row.getByText("Costo $600.00")).toBeInTheDocument();
     expect(row.getByText("Utilidad $2,150.00")).toBeInTheDocument();
+  });
+
+  it("shows each line's quantity and its total (unit price x quantity), not the unit price", async () => {
+    listSalesMock.mockResolvedValue({
+      sales: [
+        sale({
+          items: [
+            { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, quantity: 3, option: "Talla 7" },
+            { handle: "aretes-sol", title: "Aretes Sol", price: 90_000, quantity: 1 },
+          ],
+          subtotal: 645_000,
+          total: 645_000,
+        }),
+      ],
+      hasNextPage: false,
+    });
+
+    await renderPage();
+
+    const row = within(screen.getByRole("heading", { name: "Anillo Luna + 1 más" }).closest("li") as HTMLElement);
+    expect(row.getByText("Anillo Luna · Talla 7 · × 3")).toBeInTheDocument();
+    expect(row.getByText("$5,550.00")).toBeInTheDocument();
+    // A single unit has no "× 1" noise.
+    expect(row.getByText("Aretes Sol")).toBeInTheDocument();
+    // Profit is the sale's own subtotal minus its frozen cost.
+    expect(row.getByText("Utilidad $5,850.00")).toBeInTheDocument();
+  });
+
+  it("badges an oversold sale 'Revisar: sobreventa' and no other", async () => {
+    listSalesMock.mockResolvedValue({
+      sales: [
+        sale({ id: "flagged", oversold: true, items: [{ handle: "a", title: "Pieza marcada", price: 1, quantity: 2 }] }),
+        sale({ id: "clean", items: [{ handle: "b", title: "Pieza limpia", price: 1, quantity: 1 }] }),
+      ],
+      hasNextPage: false,
+    });
+
+    await renderPage();
+
+    const flagged = within(rowOf("Pieza marcada"));
+    expect(flagged.getByText("Revisar: sobreventa")).toBeInTheDocument();
+    expect(within(rowOf("Pieza limpia")).queryByText("Revisar: sobreventa")).not.toBeInTheDocument();
   });
 
   it("mutes a voided sale, badges it and offers no way to void it again", async () => {
@@ -591,8 +672,8 @@ describe("Ventas page", () => {
     listCatalogMock.mockResolvedValue({
       products: [
         product(),
-        product({ handle: "aretes-sol", title: "Aretes Sol", availability: "sold" }),
-        product({ handle: "dije-mar", title: "Dije Mar" }),
+        product({ handle: "aretes-sol", title: "Aretes Sol", availability: "sold", stock: 0 }),
+        product({ handle: "dije-mar", title: "Dije Mar", stock: 4 }),
       ],
       truncated: false,
     });
@@ -600,11 +681,24 @@ describe("Ventas page", () => {
     await renderPage();
 
     const options = within(screen.getByLabelText("Pieza")).getAllByRole("option");
+    // A design in several copies says how many are left.
     expect(options.map((option) => option.textContent)).toEqual([
       "Elige una pieza",
       "Anillo Luna",
-      "Dije Mar",
+      "Dije Mar (4 disponibles)",
     ]);
+  });
+
+  it("caps the quantity of the first row at the stock of the piece it starts with", async () => {
+    listCatalogMock.mockResolvedValue({
+      products: [product({ stock: 4 })],
+      truncated: false,
+    });
+
+    await renderPage();
+
+    expect(screen.getByLabelText("Cantidad")).toHaveValue(1);
+    expect(screen.getByLabelText("Descontar de la tienda")).toBeChecked();
   });
 
   it("explains when nothing is left to sell, and when the catalog cannot be read", async () => {

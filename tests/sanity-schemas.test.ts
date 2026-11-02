@@ -16,7 +16,7 @@ import {
 import { category } from "@/sanity/schemaTypes/category";
 import { collection } from "@/sanity/schemaTypes/collection";
 import { schemaTypes } from "@/sanity/schemaTypes";
-import { product } from "@/sanity/schemaTypes/product";
+import { SLUG_PATTERN, product } from "@/sanity/schemaTypes/product";
 import { siteSettings } from "@/sanity/schemaTypes/siteSettings";
 
 interface FieldLike {
@@ -272,5 +272,165 @@ describe("product.collections", () => {
 
     expect(names.indexOf("collections")).toBe(names.indexOf("category") + 1);
     expect(fieldOf(product, "category").type).toBe("reference");
+  });
+});
+
+describe("product.stock", () => {
+  const field = fieldOf(product, "stock");
+
+  it("is a number titled 'Piezas disponibles', with the Spanish description for the artisan", () => {
+    expect(field.type).toBe("number");
+    expect(field.title).toBe("Piezas disponibles");
+    expect(field.description).toBe(
+      "1 = pieza única. Súbelo si haces más de una; llega a 0 sola al venderse.",
+    );
+  });
+
+  it("starts at 1, the one-of-one model", () => {
+    expect(field.initialValue).toBe(1);
+  });
+
+  // A stub that records the rule chain, so the contract (required, a whole
+  // number, never negative) is asserted without the Studio package.
+  it("must be required, an integer, and at least 0", () => {
+    const calls: Array<[string, unknown?]> = [];
+    const rule = {
+      required() {
+        calls.push(["required"]);
+        return rule;
+      },
+      integer() {
+        calls.push(["integer"]);
+        return rule;
+      },
+      min(value: number) {
+        calls.push(["min", value]);
+        return rule;
+      },
+    };
+
+    field.validation?.(rule);
+
+    expect(calls).toEqual([["required"], ["integer"], ["min", 0]]);
+  });
+
+  it("sits before the legacy status in the Studio form", () => {
+    const names = (product as unknown as { fields: FieldLike[] }).fields.map(
+      (entry) => entry.name,
+    );
+
+    expect(names.indexOf("stock")).toBeGreaterThan(-1);
+    expect(names.indexOf("stock")).toBeLessThan(names.indexOf("status"));
+  });
+});
+
+describe("product.status (legacy, kept in sync by the sale paths)", () => {
+  const field = fieldOf(product, "status") as FieldLike & { readOnly?: unknown };
+
+  it("is read-only in Studio and titled 'Estado (automático)'", () => {
+    expect(field.readOnly).toBe(true);
+    expect(field.title).toBe("Estado (automático)");
+  });
+
+  it("says it is kept in sync by sales, in Spanish", () => {
+    expect(field.description).toMatch(/Se mantiene solo/);
+    expect(field.description).toMatch(/Vendida/);
+  });
+
+  it("keeps its allowed values and its default, so existing documents still validate", () => {
+    expect(TITLES_AND_VALUES(field)).toEqual([
+      ["Disponible", "available"],
+      ["Vendida", "sold"],
+    ]);
+    expect(field.initialValue).toBe("available");
+  });
+});
+
+describe("product preview", () => {
+  const preview = (
+    product as unknown as {
+      preview: {
+        prepare: (value: Record<string, unknown>) => {
+          title: unknown;
+          subtitle: string;
+        };
+      };
+    }
+  ).preview;
+
+  it.each([
+    [{ stock: 1, status: "available" }, "1 pieza disponible"],
+    [{ stock: 4, status: "sold" }, "4 piezas disponibles"],
+    [{ stock: 0, status: "available" }, "Agotada"],
+    // A document that predates the stock field: the legacy status decides.
+    [{ status: "available" }, "1 pieza disponible"],
+    [{ status: "sold" }, "Agotada"],
+  ])("shows the piece count in the list: %j -> %s", (value, subtitle) => {
+    expect(preview.prepare({ title: "Anillo", ...value }).subtitle).toBe(subtitle);
+  });
+});
+
+describe("product.slug", () => {
+  const field = fieldOf(product, "slug");
+
+  // The Studio rule, exercised through a stub: `required()` chains into
+  // `custom()`, whose validator is what the artisan's typing runs through.
+  function studioValidator(): (value: unknown) => unknown {
+    let captured: ((value: unknown) => unknown) | undefined;
+    let required = false;
+    const rule = {
+      required() {
+        required = true;
+        return rule;
+      },
+      custom(validator: (value: unknown) => unknown) {
+        captured = validator;
+        return rule;
+      },
+    };
+    field.validation?.(rule);
+    if (!required) throw new Error("the slug must stay required");
+    if (!captured) throw new Error("the slug registered no custom validation");
+    return captured;
+  }
+
+  it.each(["anillo-plata", "anillo-plata-cera-perdida", "dije-oro-14k", "a", "123", "a-b-c"])(
+    "accepts %s (lowercase letters, digits and hyphens)",
+    (current) => {
+      expect(studioValidator()({ current })).toBe(true);
+    },
+  );
+
+  it.each([
+    ["a comma", "anillo,plata"],
+    ["a space", "anillo plata"],
+    ["a semicolon", "anillo;plata"],
+    ["an asterisk", "anillo*2"],
+    ["a pipe", "anillo|plata"],
+    ["an equals sign", "anillo=plata"],
+    ["a percent sign", "anillo%20plata"],
+    ["a slash", "anillo/plata"],
+    ["a dot", "anillo.plata"],
+    ["an underscore", "anillo_plata"],
+    ["an uppercase letter", "Anillo-plata"],
+    ["an accent", "anillo-plátano"],
+    ["an enye", "ñandú"],
+    ["a newline", "anillo\nplata"],
+  ])("rejects a slug with %s, in Spanish", (_label, current) => {
+    const result = studioValidator()({ current });
+
+    expect(result).toMatch(/^El slug solo puede llevar letras minúsculas/);
+  });
+
+  it("leaves a missing slug to required(), which reports it", () => {
+    expect(studioValidator()(undefined)).toBe(true);
+    expect(studioValidator()({})).toBe(true);
+    expect(studioValidator()({ current: "" })).toBe(true);
+  });
+
+  it("is the same pattern the comma-separated lists rely on: no character those formats use is allowed", () => {
+    for (const reserved of [",", ";", "*", "|", "=", "%", ":"]) {
+      expect(SLUG_PATTERN.test(`a${reserved}b`)).toBe(false);
+    }
   });
 });

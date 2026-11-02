@@ -207,3 +207,137 @@ describe("sanityApi.getProductByHandle — option resolved from the category", (
     ).toEqual({ kind: "none" });
   });
 });
+
+// A piece's stock decides what the storefront sells. Every document created
+// before the `stock` field existed has none (GROQ projects it as null), and
+// then the legacy `status` decides: nothing about an existing catalog changes.
+describe("sanityApi — stock", () => {
+  it("projects the stock next to the legacy status in the three product reads", async () => {
+    const { PRODUCTS_LIST_QUERY, AVAILABILITY_BY_HANDLES_QUERY } = await import(
+      "@/lib/commerce/sanity/queries"
+    );
+
+    for (const query of [
+      PRODUCT_BY_HANDLE_QUERY,
+      PRODUCTS_LIST_QUERY,
+      AVAILABILITY_BY_HANDLES_QUERY,
+    ]) {
+      expect(query).toMatch(/\n\s*stock,?\n/);
+      expect(query).toMatch(/\n\s*status,?\n/);
+    }
+  });
+
+  it("exposes the stock on the detail product, and 'available' while it is above zero", async () => {
+    fetchMock.mockResolvedValue(rawProduct({ stock: 4, status: "sold" }));
+
+    const product = await sanityApi.getProductByHandle("anillo-luna", "es");
+
+    // The stock wins over a stale legacy status.
+    expect(product).toMatchObject({ stock: 4, availability: "available" });
+  });
+
+  it("is sold at zero, whatever the legacy status says", async () => {
+    fetchMock.mockResolvedValue(rawProduct({ stock: 0, status: "available" }));
+
+    const product = await sanityApi.getProductByHandle("anillo-luna", "es");
+
+    expect(product).toMatchObject({ stock: 0, availability: "sold" });
+  });
+
+  it.each([
+    ["available", 1, "available"],
+    ["sold", 0, "sold"],
+    // The fail-safe of the legacy reading: nothing but "available" is for sale.
+    ["borrador", 0, "sold"],
+    [null, 0, "sold"],
+  ])(
+    "falls back to the legacy status %j when the document has no stock: stock %i, %s",
+    async (status, stock, availability) => {
+      fetchMock.mockResolvedValue(rawProduct({ status, stock: null }));
+
+      const product = await sanityApi.getProductByHandle("anillo-luna", "es");
+
+      expect(product).toMatchObject({ stock, availability });
+    },
+  );
+
+  it("treats an absent stock key like a null one (a document read through a fixture)", async () => {
+    fetchMock.mockResolvedValue(rawProduct({ status: "available" }));
+
+    const product = await sanityApi.getProductByHandle("anillo-luna", "es");
+
+    expect(product).toMatchObject({ stock: 1, availability: "available" });
+  });
+
+  it("exposes the stock on every card of the listing too", async () => {
+    fetchMock.mockResolvedValue([
+      { handle: "serie", title: "Serie", price: { amount: 100, currency: "MXN" }, status: "available", stock: 3, cover: null, categorySlug: null, collectionSlugs: [] },
+      { handle: "unica", title: "Única", price: { amount: 100, currency: "MXN" }, status: "available", stock: null, cover: null, categorySlug: null, collectionSlugs: [] },
+      { handle: "agotada", title: "Agotada", price: { amount: 100, currency: "MXN" }, status: "available", stock: 0, cover: null, categorySlug: null, collectionSlugs: [] },
+    ]);
+
+    const products = await sanityApi.getProducts("es");
+
+    expect(products.map(({ handle, stock, availability }) => [handle, stock, availability])).toEqual([
+      ["serie", 3, "available"],
+      ["unica", 1, "available"],
+      ["agotada", 0, "sold"],
+    ]);
+  });
+
+  it("reads availability from the stock too, failing safe to sold for a handle Sanity did not return", async () => {
+    fetchMock.mockResolvedValue([
+      { handle: "serie", status: "sold", stock: 2 },
+      { handle: "agotada", status: "available", stock: 0 },
+      { handle: "antigua", status: "available", stock: null },
+    ]);
+
+    const result = await sanityApi.getAvailability(["serie", "agotada", "antigua", "fantasma"]);
+
+    expect(result).toEqual({
+      serie: "available",
+      agotada: "sold",
+      antigua: "available",
+      fantasma: "sold",
+    });
+  });
+
+  it("floors a fractional stock and never goes below zero", async () => {
+    fetchMock.mockResolvedValue(rawProduct({ stock: 2.9 }));
+    expect((await sanityApi.getProductByHandle("a", "es"))?.stock).toBe(2);
+
+    fetchMock.mockResolvedValue(rawProduct({ stock: -3 }));
+    expect(await sanityApi.getProductByHandle("a", "es")).toMatchObject({
+      stock: 0,
+      availability: "sold",
+    });
+  });
+
+  it("gives the fixtures the same shape: a stock that matches their availability", async () => {
+    const products = await fixturesApi.getProducts("es");
+
+    for (const product of products) {
+      expect(product.stock).toBe(product.availability === "available" ? 1 : 0);
+    }
+  });
+});
+
+// A piece being edited in Studio has a published document AND a draft
+// (`drafts.<id>`) with the same slug. Whatever the client's perspective, the
+// lookups that decide a sale must never see the draft.
+describe("sanityApi — drafts", () => {
+  it("excludes drafts from the queries that decide a sale: the product and the availability", async () => {
+    const { AVAILABILITY_BY_HANDLES_QUERY } = await import("@/lib/commerce/sanity/queries");
+
+    for (const query of [PRODUCT_BY_HANDLE_QUERY, AVAILABILITY_BY_HANDLES_QUERY]) {
+      expect(query).toContain('!(_id in path("drafts.**"))');
+    }
+  });
+
+  it("keeps the handles parameterized next to the draft filter", async () => {
+    const { AVAILABILITY_BY_HANDLES_QUERY } = await import("@/lib/commerce/sanity/queries");
+
+    expect(AVAILABILITY_BY_HANDLES_QUERY).toContain("slug.current in $handles");
+    expect(PRODUCT_BY_HANDLE_QUERY).toContain("slug.current == $handle");
+  });
+});

@@ -15,7 +15,7 @@ import type { Product } from "../lib/commerce/types";
 
 type PanelProduct = Pick<
   Product,
-  "handle" | "title" | "price" | "cover" | "options"
+  "handle" | "title" | "price" | "cover" | "options" | "stock"
 >;
 
 const RING: PanelProduct = {
@@ -23,6 +23,7 @@ const RING: PanelProduct = {
   title: "Anillo de plata fundido a la cera perdida",
   price: { amount: 185000, currency: "MXN" },
   cover: null,
+  stock: 3,
   options: { kind: "ringSize", values: ["6", "7", "7.5"] },
 };
 
@@ -31,6 +32,7 @@ const PENDANT: PanelProduct = {
   title: "Dije de oro con amatista",
   price: { amount: 420000, currency: "MXN" },
   cover: null,
+  stock: 1,
   options: {
     kind: "chainLength",
     values: [
@@ -46,6 +48,7 @@ const PLAIN: PanelProduct = {
   title: 'Aretes de plata "fase lunar"',
   price: { amount: 95000, currency: "MXN" },
   cover: null,
+  stock: 2,
   options: { kind: "none" },
 };
 
@@ -155,6 +158,8 @@ describe("PurchasePanel — ring size", () => {
         cover: null,
         option: { kind: "ringSize", value: "7.5" },
         quantity: 1,
+        // Display-only: lets the cart cap the quantity without a round trip.
+        stock: 3,
       },
     ]);
   });
@@ -263,6 +268,61 @@ describe("PurchasePanel — piece without an option", () => {
     expect(window.localStorage.getItem(CART_STORAGE_KEY)).not.toContain(
       "option",
     );
+  });
+});
+
+describe("PurchasePanel — stock", () => {
+  it("adds the same piece again as a higher quantity, up to the stock", () => {
+    renderPanel(PLAIN);
+
+    fireEvent.click(acquireButton());
+    expect(cartItems()[0].quantity).toBe(1);
+    expect(acquireButton()).toBeEnabled();
+
+    fireEvent.click(acquireButton());
+    expect(cartItems()).toHaveLength(1);
+    expect(cartItems()[0].quantity).toBe(2);
+  });
+
+  it("disables the button, with a hint tied to it, once the cart holds every piece the shop has", () => {
+    renderPanel(PLAIN);
+
+    fireEvent.click(acquireButton());
+    fireEvent.click(acquireButton());
+
+    const button = acquireButton();
+    expect(button).toBeDisabled();
+    const hint = screen.getByText(esMessages.ProductDetail.allInCartHint);
+    expect(button).toHaveAttribute("aria-describedby", hint.id);
+    expect(cartItems()[0].quantity).toBe(2);
+  });
+
+  it("counts every size of a ring against the same stock", () => {
+    renderPanel(RING);
+
+    fireEvent.click(screen.getByRole("radio", { name: "6" }));
+    fireEvent.click(acquireButton());
+    fireEvent.click(screen.getByRole("radio", { name: "7" }));
+    fireEvent.click(acquireButton());
+    fireEvent.click(screen.getByRole("radio", { name: "7.5" }));
+    fireEvent.click(acquireButton());
+
+    // 3 in stock, 3 in the cart (one per size).
+    expect(cartItems().map((line) => line.quantity)).toEqual([1, 1, 1]);
+    expect(acquireButton()).toBeDisabled();
+  });
+
+  it("keeps a missing choice as the reason shown while the option is unpicked", () => {
+    renderPanel(PENDANT);
+
+    fireEvent.click(screen.getByRole("radio", { name: "40 cm" }));
+    fireEvent.click(acquireButton());
+
+    // The only piece is in the cart: the button is off, with that reason.
+    expect(acquireButton()).toBeDisabled();
+    expect(
+      screen.getByText(esMessages.ProductDetail.allInCartHint),
+    ).toBeInTheDocument();
   });
 });
 

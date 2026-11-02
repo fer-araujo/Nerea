@@ -58,6 +58,12 @@ export interface ProductSummary {
   price: Money;
   availability: Availability;
   /**
+   * Pieces that can still be sold, a whole number >= 0 (1 = a one-of-one
+   * piece). `availability` is "available" exactly when this is above 0. Display
+   * and a client-side cart cap only: checkoutAction re-reads it uncached.
+   */
+  stock: number;
+  /**
    * First gallery item, already resolved for the catalog card's cover —
    * `null` when the piece has no media yet (falls through to
    * `PlaceholderBlock`). Replaces the old single `image: string` field;

@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import esMessages from "../messages/es.json";
+import enMessages from "../messages/en.json";
 import { MotionProvider } from "../components/motion/MotionProvider";
 import {
   CART_STORAGE_KEY,
@@ -29,11 +30,14 @@ vi.mock("../lib/cart/checkout", () => ({
 
 const checkoutActionMock = vi.mocked(checkoutAction);
 
+// ITEM_A is a design made in several copies (5 in stock); ITEM_B is a
+// one-of-one piece (1 in stock).
 const ITEM_A: Omit<CartLineItem, "quantity"> = {
   handle: "anillo-plata-cera-perdida",
   title: "Anillo de plata fundido a la cera perdida",
   price: { amount: 185000, currency: "MXN" },
   cover: null,
+  stock: 5,
 };
 
 const ITEM_B: Omit<CartLineItem, "quantity"> = {
@@ -41,6 +45,7 @@ const ITEM_B: Omit<CartLineItem, "quantity"> = {
   title: 'Aretes de plata "fase lunar"',
   price: { amount: 95000, currency: "MXN" },
   cover: null,
+  stock: 1,
 };
 
 // The same ring in two sizes, and the same pendant on two chains — the
@@ -59,6 +64,7 @@ const PENDANT_45: Omit<CartLineItem, "quantity"> = {
   title: "Dije de oro con amatista",
   price: { amount: 420000, currency: "MXN" },
   cover: null,
+  stock: 2,
   option: { kind: "chainLength", lengthCm: 45 },
 };
 const PENDANT_50: Omit<CartLineItem, "quantity"> = {
@@ -71,6 +77,7 @@ const PENDANT_50: Omit<CartLineItem, "quantity"> = {
 // surface those real components call, scoped to what this file needs.
 const HARNESS_ITEMS: Record<string, Omit<CartLineItem, "quantity">> = {
   "add-a": ITEM_A,
+  "add-a-fewer": { ...ITEM_A, stock: 2 },
   "add-b": ITEM_B,
   "add-ring-7": RING_7,
   "add-ring-8": RING_8,
@@ -377,6 +384,17 @@ describe("CartDrawer — localStorage persistence", () => {
         // NaN / Infinity cannot survive JSON, they come back as null.
         { ...ITEM_A, quantity: 1, price: { amount: null, currency: "MXN" } },
         { ...ITEM_A, quantity: 1, price: { amount: 185000, currency: 5 } },
+        // Cart arithmetic runs on quantity and stock: a bad one drops the line.
+        { ...ITEM_A, quantity: 0 },
+        { ...ITEM_A, quantity: -2 },
+        { ...ITEM_A, quantity: 1.5 },
+        { ...ITEM_A, quantity: "2" },
+        { ...ITEM_A, quantity: null },
+        { ...ITEM_A, quantity: undefined },
+        { ...ITEM_A, quantity: 1, stock: 0 },
+        { ...ITEM_A, quantity: 1, stock: 2.5 },
+        { ...ITEM_A, quantity: 1, stock: "5" },
+        { ...ITEM_A, quantity: 1, stock: undefined },
         { ...ITEM_B, quantity: 1 },
       ]),
     );
@@ -390,32 +408,44 @@ describe("CartDrawer — localStorage persistence", () => {
   });
 });
 
-describe("cart v2 storage", () => {
-  it("stores the cart under the v2 key", () => {
-    expect(CART_STORAGE_KEY).toBe("nerea:cart:v2");
+describe("cart v3 storage", () => {
+  it("stores the cart under the v3 key", () => {
+    expect(CART_STORAGE_KEY).toBe("nerea:cart:v3");
   });
 
-  it("ignores a v1 cart, whose lines predate options and could not pass checkout", async () => {
-    window.localStorage.setItem(
-      "nerea:cart:v1",
-      JSON.stringify([{ ...ITEM_A, quantity: 1 }]),
-    );
+  it.each(["nerea:cart:v1", "nerea:cart:v2"])(
+    "ignores a %s cart, whose lines predate quantities and stock",
+    async (key) => {
+      window.localStorage.setItem(
+        key,
+        JSON.stringify([{ ...ITEM_A, quantity: 1 }]),
+      );
+
+      renderCart();
+      fireEvent.click(screen.getByText("open-drawer"));
+
+      expect(await screen.findByText(esMessages.Cart.empty)).toBeInTheDocument();
+      expect(screen.queryByText(ITEM_A.title)).not.toBeInTheDocument();
+    },
+  );
+
+  it("drops a v3-keyed line that lacks the stock (an old shape written by hand)", async () => {
+    const withoutStock: Record<string, unknown> = { ...ITEM_A, quantity: 1 };
+    delete withoutStock.stock;
+    window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([withoutStock]));
 
     renderCart();
     fireEvent.click(screen.getByText("open-drawer"));
 
     expect(await screen.findByText(esMessages.Cart.empty)).toBeInTheDocument();
-    expect(screen.queryByText(ITEM_A.title)).not.toBeInTheDocument();
   });
 
-  it("persists the chosen option on the line", async () => {
+  it("persists the chosen option, the quantity and the stock on the line", async () => {
     renderCart();
     fireEvent.click(screen.getByText("add-ring-7"));
     await screen.findByText(ITEM_A.title);
 
-    expect(storedCart()).toEqual([
-      { ...RING_7, quantity: 1 },
-    ]);
+    expect(storedCart()).toEqual([{ ...RING_7, quantity: 1 }]);
   });
 
   it("restores a saved option on mount", async () => {
@@ -430,38 +460,359 @@ describe("cart v2 storage", () => {
     expect(await screen.findByText("Cadena 45 cm")).toBeInTheDocument();
   });
 
-  it("keeps a handle once and REPLACES its option when the piece is added again", async () => {
+  it("restores a saved quantity on mount", async () => {
+    window.localStorage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify([{ ...ITEM_A, quantity: 3 }]),
+    );
+
+    renderCart();
+    fireEvent.click(screen.getByText("open-drawer"));
+
+    expect(await screen.findByText("× 3")).toBeInTheDocument();
+  });
+});
+
+describe("CartDrawer — line identity and quantity", () => {
+  it("raises the quantity when the same piece with the same option is added again", async () => {
+    renderCart();
+
+    fireEvent.click(screen.getByText("add-ring-7"));
+    fireEvent.click(screen.getByText("add-ring-7"));
+
+    expect(await screen.findByText("× 2")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(storedCart()).toEqual([{ ...RING_7, quantity: 2 }]);
+  });
+
+  it("makes a different option of the same piece a NEW line, keeping both", async () => {
     renderCart();
 
     fireEvent.click(screen.getByText("add-pendant-45"));
-    expect(await screen.findByText("Cadena 45 cm")).toBeInTheDocument();
-    expect(screen.getAllByText("$4,200.00")).toHaveLength(2); // line + subtotal
-
     fireEvent.click(screen.getByText("add-pendant-50"));
 
-    // Still a single line, now on the 50 cm chain at its higher price.
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(await screen.findByText("Cadena 45 cm")).toBeInTheDocument();
     expect(screen.getByText("Cadena 50 cm")).toBeInTheDocument();
-    expect(screen.queryByText("Cadena 45 cm")).not.toBeInTheDocument();
-    expect(screen.getAllByText("$4,350.00")).toHaveLength(2);
-    expect(screen.queryByText("$4,200.00")).not.toBeInTheDocument();
-
-    expect(storedCart()).toEqual([{ ...PENDANT_50, quantity: 1 }]);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(storedCart().map((line) => [line.option, line.quantity])).toEqual([
+      [{ kind: "chainLength", lengthCm: 45 }, 1],
+      [{ kind: "chainLength", lengthCm: 50 }, 1],
+    ]);
   });
 
-  it("keeps the line's position when its option is replaced", async () => {
+  it("treats a piece without an option and the same piece with one as different lines", async () => {
+    renderCart();
+
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-ring-7"));
+
+    await screen.findByText("Talla 7");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("keeps a line's position and refreshes what it shows when the same line is added again", async () => {
     renderCart();
 
     fireEvent.click(screen.getByText("add-ring-7"));
     fireEvent.click(screen.getByText("add-b"));
-    fireEvent.click(screen.getByText("add-ring-8"));
+    fireEvent.click(screen.getByText("add-ring-7"));
 
-    await screen.findByText("Talla 8");
+    await screen.findByText("× 2");
     expect(storedCart().map((line) => line.handle)).toEqual([
       ITEM_A.handle,
       ITEM_B.handle,
     ]);
-    expect(storedCart()[0].option).toEqual({ kind: "ringSize", value: "8" });
+  });
+
+  it("shows the line total (price times quantity) and a subtotal that adds the lines up", async () => {
+    renderCart();
+
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-b"));
+
+    await screen.findByText("× 3");
+    // 3 x $1,850.00 = $5,550.00 on the line, + $950.00 = $6,500.00.
+    expect(screen.getByText("$5,550.00")).toBeInTheDocument();
+    expect(screen.getByText("$6,500.00")).toBeInTheDocument();
+  });
+
+  it("caps the TOTAL quantity of a piece at its stock, across all its options", async () => {
+    renderCart();
+
+    // PENDANT has 2 in stock: one of each chain fills it.
+    fireEvent.click(screen.getByText("add-pendant-45"));
+    fireEvent.click(screen.getByText("add-pendant-50"));
+    fireEvent.click(screen.getByText("add-pendant-45"));
+    fireEvent.click(screen.getByText("add-pendant-50"));
+
+    await screen.findByText("Cadena 50 cm");
+    expect(storedCart().map((line) => line.quantity)).toEqual([1, 1]);
+  });
+
+  it("does not add a second unit of a one-of-one piece", async () => {
+    renderCart();
+
+    fireEvent.click(screen.getByText("add-b"));
+    fireEvent.click(screen.getByText("add-b"));
+
+    await screen.findByText(ITEM_B.title);
+    expect(storedCart()).toEqual([{ ...ITEM_B, quantity: 1 }]);
+  });
+
+  it("takes the newest stock figure when a piece is added again", async () => {
+    renderCart();
+
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-a-fewer"));
+
+    await screen.findByText("× 2");
+    expect(storedCart().map((line) => line.stock)).toEqual([2]);
+  });
+});
+
+describe("CartDrawer — quantity controls", () => {
+  const plusFor = (title: string) =>
+    screen.getByRole("button", {
+      name: esMessages.Cart.increase.replace("{title}", title),
+    });
+  const minusFor = (title: string) =>
+    screen.getByRole("button", {
+      name: esMessages.Cart.decrease.replace("{title}", title),
+    });
+
+  it("renders each line's quantity as a labelled group with accessible − and + buttons", async () => {
+    renderCart();
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText("× 1");
+
+    const group = screen.getByRole("group", {
+      name: esMessages.Cart.quantityGroup.replace("{title}", ITEM_A.title),
+    });
+    expect(within(group).getAllByRole("button")).toHaveLength(2);
+    expect(minusFor(ITEM_A.title)).toBeInTheDocument();
+    expect(plusFor(ITEM_A.title)).toBeInTheDocument();
+  });
+
+  it("raises and lowers the quantity, updating the line total and the stored cart", async () => {
+    renderCart();
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText("× 1");
+
+    fireEvent.click(plusFor(ITEM_A.title));
+    fireEvent.click(plusFor(ITEM_A.title));
+
+    expect(screen.getByText("× 3")).toBeInTheDocument();
+    expect(screen.getAllByText("$5,550.00")).toHaveLength(2); // line + subtotal
+    expect(storedCart()[0].quantity).toBe(3);
+
+    fireEvent.click(minusFor(ITEM_A.title));
+
+    expect(screen.getByText("× 2")).toBeInTheDocument();
+    expect(storedCart()[0].quantity).toBe(2);
+  });
+
+  it("disables − at 1: removing a line is the Eliminar button's job", async () => {
+    renderCart();
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText("× 1");
+
+    expect(minusFor(ITEM_A.title)).toBeDisabled();
+  });
+
+  it("disables + once the cart holds every piece the shop has, and says how many are left", async () => {
+    renderCart();
+    fireEvent.click(screen.getByText("add-pendant-45"));
+    fireEvent.click(screen.getByText("add-pendant-45"));
+    await screen.findByText("× 2");
+
+    const plus = plusFor(`${PENDANT_45.title}, Cadena 45 cm`);
+    expect(plus).toBeDisabled();
+    expect(screen.getByText("Solo quedan 2")).toBeInTheDocument();
+
+    fireEvent.click(plus);
+    expect(storedCart()[0].quantity).toBe(2);
+  });
+
+  it("stops + at the stock shared with the piece's OTHER lines", async () => {
+    renderCart();
+    fireEvent.click(screen.getByText("add-pendant-45"));
+    fireEvent.click(screen.getByText("add-pendant-50"));
+    await screen.findByText("Cadena 50 cm");
+
+    // 1 + 1 = the whole stock of 2: neither line can grow.
+    expect(
+      plusFor(`${PENDANT_45.title}, Cadena 45 cm`),
+    ).toBeDisabled();
+    expect(
+      plusFor(`${PENDANT_50.title}, Cadena 50 cm`),
+    ).toBeDisabled();
+  });
+
+  it("does not show the 'only N left' note for a one-of-one piece", async () => {
+    renderCart();
+    fireEvent.click(screen.getByText("add-b"));
+    await screen.findByText(ITEM_B.title);
+
+    expect(screen.getByRole("button", {
+      name: esMessages.Cart.increase.replace("{title}", ITEM_B.title),
+    })).toBeDisabled();
+    expect(screen.queryByText(/^Solo quedan/)).not.toBeInTheDocument();
+  });
+
+  it("names each control with the option, so two sizes of one ring can be told apart", async () => {
+    renderCart();
+    fireEvent.click(screen.getByText("add-ring-7"));
+    fireEvent.click(screen.getByText("add-ring-8"));
+    await screen.findByText("Talla 8");
+
+    expect(
+      screen.getByRole("button", {
+        name: esMessages.Cart.removeLabel.replace(
+          "{title}",
+          `${ITEM_A.title}, Talla 7`,
+        ),
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: esMessages.Cart.removeLabel.replace(
+          "{title}",
+          `${ITEM_A.title}, Talla 8`,
+        ),
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("removes only the line it belongs to when a piece is in the cart twice", async () => {
+    renderCart();
+    fireEvent.click(screen.getByText("add-ring-7"));
+    fireEvent.click(screen.getByText("add-ring-8"));
+    await screen.findByText("Talla 8");
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: esMessages.Cart.removeLabel.replace(
+          "{title}",
+          `${ITEM_A.title}, Talla 7`,
+        ),
+      }),
+    );
+
+    expect(screen.queryByText("Talla 7")).not.toBeInTheDocument();
+    expect(screen.getByText("Talla 8")).toBeInTheDocument();
+    expect(storedCart().map((line) => line.option)).toEqual([
+      { kind: "ringSize", value: "8" },
+    ]);
+  });
+
+  it("counts pieces, not lines, in the cart total sent to checkout", async () => {
+    checkoutActionMock.mockResolvedValue({ ok: false, reason: "checkout-failed" });
+    renderCart();
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-a"));
+    await screen.findByText("× 2");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    );
+
+    await waitFor(() => expect(checkoutActionMock).toHaveBeenCalledTimes(1));
+    expect(checkoutActionMock).toHaveBeenCalledWith(
+      [{ ...ITEM_A, quantity: 2 }],
+      "es",
+    );
+  });
+});
+
+describe("CartDrawer — cart-too-large result", () => {
+  it("keeps the cart exactly as it is and says it is too large to pay in one go", async () => {
+    checkoutActionMock.mockResolvedValue({ ok: false, reason: "cart-too-large" });
+    renderCart();
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-b"));
+    await screen.findByText("× 2");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    );
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(esMessages.Cart.tooLargeNotice);
+    expect(screen.getByText(ITEM_A.title)).toBeInTheDocument();
+    expect(screen.getByText(ITEM_B.title)).toBeInTheDocument();
+    expect(storedCart().map((line) => [line.handle, line.quantity])).toEqual([
+      [ITEM_A.handle, 2],
+      [ITEM_B.handle, 1],
+    ]);
+    // And the shopper can try again.
+    expect(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    ).toBeEnabled();
+  });
+
+  it("has the notice in both languages", () => {
+    expect(esMessages.Cart.tooLargeNotice).toBeTruthy();
+    expect(enMessages.Cart.tooLargeNotice).toBeTruthy();
+  });
+});
+
+describe("CartDrawer — insufficient-stock result", () => {
+  it("clamps the named piece to what is left, keeps the rest, and shows the localized notice", async () => {
+    checkoutActionMock.mockResolvedValue({
+      ok: false,
+      reason: "insufficient-stock",
+      items: [{ handle: ITEM_A.handle, available: 2 }],
+    });
+    renderCart();
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-a"));
+    fireEvent.click(screen.getByText("add-b"));
+    await screen.findByText("× 3");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    );
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(esMessages.Cart.stockNotice);
+    expect(screen.getByText("× 2")).toBeInTheDocument();
+    expect(screen.getByText(ITEM_B.title)).toBeInTheDocument();
+    expect(
+      storedCart().map((line) => [line.handle, line.quantity, line.stock]),
+    ).toEqual([
+      [ITEM_A.handle, 2, 2],
+      [ITEM_B.handle, 1, 1],
+    ]);
+  });
+
+  it("trims a piece's lines in cart order, dropping the one that ends at zero", async () => {
+    checkoutActionMock.mockResolvedValue({
+      ok: false,
+      reason: "insufficient-stock",
+      items: [{ handle: ITEM_A.handle, available: 1 }],
+    });
+    renderCart();
+    fireEvent.click(screen.getByText("add-ring-7"));
+    fireEvent.click(screen.getByText("add-ring-8"));
+    await screen.findByText("Talla 8");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esMessages.Cart.checkout }),
+    );
+
+    await screen.findByRole("alert");
+    // The first line (size 7) keeps the one unit that is left; size 8 goes.
+    expect(screen.getByText("Talla 7")).toBeInTheDocument();
+    expect(screen.queryByText("Talla 8")).not.toBeInTheDocument();
+  });
+
+  it("shows the notice in the English locale too", () => {
+    expect(enMessages.Cart.stockNotice).toBeTruthy();
+    expect(enMessages.Cart.quantity).toBe("× {count}");
   });
 });
 

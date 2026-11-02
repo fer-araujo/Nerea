@@ -44,7 +44,9 @@ vi.mock("@/lib/commerce/stripe/client", () => ({
 
 import { isAlreadyExistsError } from "@/lib/admin/data/shared";
 import {
+  readStripeSaleStock,
   recordStripeSale,
+  saveStripeSaleStock,
   type StripeSaleSession,
 } from "@/lib/admin/data/stripe-sales";
 
@@ -73,6 +75,7 @@ function product(overrides: Partial<Product> = {}): Product {
     description: "",
     price: { amount: 185_000, currency: "MXN" },
     availability: "sold",
+    stock: 0,
     cover: null,
     media: [],
     options: { kind: "none" },
@@ -133,7 +136,9 @@ describe("recordStripeSale", () => {
       source: "stripe",
       status: "active",
       date: expect.any(FakeTimestamp),
-      items: [{ handle: "anillo-luna", title: "Anillo Luna", price: 185_000 }],
+      items: [
+        { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, quantity: 1 },
+      ],
       subtotal: 185_000,
       shipping: 15_000,
       total: 200_000,
@@ -436,7 +441,13 @@ describe("recordStripeSale: items", () => {
     );
 
     expect(fake.get(SALE_PATH)?.items).toEqual([
-      { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, option: "Talla 7" },
+      {
+        handle: "anillo-luna",
+        title: "Anillo Luna",
+        price: 185_000,
+        quantity: 1,
+        option: "Talla 7",
+      },
     ]);
   });
 
@@ -464,7 +475,13 @@ describe("recordStripeSale: items", () => {
     );
 
     expect(fake.get(SALE_PATH)?.items).toEqual([
-      { handle: "dije-sol", title: "Dije Sol", price: 135_000, option: "Cadena 50 cm" },
+      {
+        handle: "dije-sol",
+        title: "Dije Sol",
+        price: 135_000,
+        quantity: 1,
+        option: "Cadena 50 cm",
+      },
     ]);
   });
 
@@ -482,7 +499,13 @@ describe("recordStripeSale: items", () => {
     );
 
     expect(fake.get(SALE_PATH)?.items).toEqual([
-      { handle: "dije-sol", title: "Dije Sol", price: 185_000, option: "Cadena 55 cm" },
+      {
+        handle: "dije-sol",
+        title: "Dije Sol",
+        price: 185_000,
+        quantity: 1,
+        option: "Cadena 55 cm",
+      },
     ]);
   });
 
@@ -492,7 +515,7 @@ describe("recordStripeSale: items", () => {
     await recordStripeSale(session({ metadata: { handles: "borrada" } }));
 
     expect(fake.get(SALE_PATH)?.items).toEqual([
-      { handle: "borrada", title: "borrada", price: 0 },
+      { handle: "borrada", title: "borrada", price: 0, quantity: 1 },
     ]);
     // The money is on the sale itself, taken from the session.
     expect(fake.get(SALE_PATH)).toMatchObject({ subtotal: 185_000, total: 200_000 });
@@ -510,6 +533,187 @@ describe("recordStripeSale: items", () => {
       "anillo-luna",
       "aretes-sol",
     ]);
+  });
+});
+
+describe("recordStripeSale: quantities (metadata.items)", () => {
+  it("records one line per (piece, option) with its quantity and the UNIT price", async () => {
+    stockCatalog(
+      product({
+        handle: "anillo-luna",
+        options: { kind: "ringSize", values: ["6", "7", "8"] },
+      }),
+    );
+
+    await recordStripeSale(
+      session({
+        amount_subtotal: 555_000,
+        metadata: {
+          handles: "anillo-luna",
+          items: "anillo-luna*2|size=7;anillo-luna*1|size=6",
+        },
+      }),
+    );
+
+    expect(fake.get(SALE_PATH)?.items).toEqual([
+      { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, quantity: 2, option: "Talla 7" },
+      { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, quantity: 1, option: "Talla 6" },
+    ]);
+    // One catalog read for the design, however many sizes it was bought in.
+    expect(getProductByHandleMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes the options from items, not from the legacy options value, when both are there", async () => {
+    stockCatalog(
+      product({
+        handle: "anillo-luna",
+        options: { kind: "ringSize", values: ["6", "7", "8"] },
+      }),
+    );
+
+    await recordStripeSale(
+      session({
+        metadata: {
+          handles: "anillo-luna",
+          items: "anillo-luna*1|size=8",
+          options: "anillo-luna:size=6",
+        },
+      }),
+    );
+
+    expect((fake.get(SALE_PATH)?.items as Array<{ option: string }>)[0].option).toBe("Talla 8");
+  });
+
+  it("freezes the cost as one unit's cost times each line's quantity", async () => {
+    seedCost("anillo-luna"); // 60_000 per unit
+    stockCatalog(
+      product({
+        handle: "anillo-luna",
+        options: { kind: "ringSize", values: ["6", "7", "8"] },
+      }),
+    );
+
+    await recordStripeSale(
+      session({
+        amount_subtotal: 555_000,
+        metadata: {
+          handles: "anillo-luna",
+          items: "anillo-luna*2|size=7;anillo-luna*1|size=6",
+        },
+      }),
+    );
+
+    expect(fake.get(SALE_PATH)).toMatchObject({
+      costOfGoods: 180_000,
+      costPending: false,
+    });
+  });
+
+  it("marks the sale 'costo pendiente' when a multi-quantity piece has no cost recorded", async () => {
+    await recordStripeSale(
+      session({ metadata: { handles: "anillo-luna", items: "anillo-luna*3" } }),
+    );
+
+    expect(fake.get(SALE_PATH)).toMatchObject({ costOfGoods: 0, costPending: true });
+  });
+
+  it("records ONLY what items names when it is present: handles is never consulted beside it", async () => {
+    stockCatalog(product(), product({ handle: "aretes-sol", title: "Aretes Sol" }));
+
+    await recordStripeSale(
+      session({ metadata: { handles: "anillo-luna,aretes-sol", items: "anillo-luna*2" } }),
+    );
+
+    expect(
+      (fake.get(SALE_PATH)?.items as Array<{ handle: string; quantity: number }>).map(
+        (item) => [item.handle, item.quantity],
+      ),
+    ).toEqual([["anillo-luna", 2]]);
+  });
+
+  it("records a slug with a comma whole, from items (the legacy comma list would split it)", async () => {
+    stockCatalog(product({ handle: "rara,pieza", title: "Pieza rara" }));
+
+    await recordStripeSale(
+      session({ metadata: { handles: "rara,pieza", items: "rara%2Cpieza*1" } }),
+    );
+
+    expect(
+      (fake.get(SALE_PATH)?.items as Array<{ handle: string }>).map((item) => item.handle),
+    ).toEqual(["rara,pieza"]);
+  });
+
+  it("is skipped when neither items nor handles name a piece", async () => {
+    await expect(recordStripeSale(session({ metadata: { items: "  ;;  " } }))).resolves.toBe(
+      "skipped",
+    );
+    expect(fake.committed).toHaveLength(0);
+  });
+});
+
+describe("stripe sale stock progress", () => {
+  it("reads nothing for a sale that does not exist, and nothing without Firebase", async () => {
+    await expect(readStripeSaleStock(SESSION_ID)).resolves.toBeNull();
+
+    configured = false;
+    await expect(readStripeSaleStock(SESSION_ID)).resolves.toBeNull();
+  });
+
+  it("reads a freshly recorded sale as 'nothing applied yet'", async () => {
+    await recordStripeSale(session());
+
+    await expect(readStripeSaleStock(SESSION_ID)).resolves.toEqual({ applied: false });
+  });
+
+  it("saves 'applied' on the sale, and stores nothing about WHICH pieces: Sanity's markers know that", async () => {
+    await recordStripeSale(session());
+    await saveStripeSaleStock(SESSION_ID, { applied: false, oversold: false });
+    await expect(readStripeSaleStock(SESSION_ID)).resolves.toEqual({ applied: false });
+
+    await saveStripeSaleStock(SESSION_ID, { applied: true, oversold: false });
+
+    await expect(readStripeSaleStock(SESSION_ID)).resolves.toEqual({ applied: true });
+    expect(fake.get(SALE_PATH)).toMatchObject({ stockApplied: true });
+    expect(fake.get(SALE_PATH)).not.toHaveProperty("oversold");
+    expect(fake.get(SALE_PATH)).not.toHaveProperty("stockDone");
+  });
+
+  it("flags the sale oversold, and keeps everything else on it as it was", async () => {
+    await recordStripeSale(session());
+    const before = fake.get(SALE_PATH);
+
+    await saveStripeSaleStock(SESSION_ID, { applied: true, oversold: true });
+
+    expect(fake.get(SALE_PATH)).toEqual({ ...before, stockApplied: true, oversold: true });
+  });
+
+  it("does not un-flag an oversold sale when a later save does not repeat it", async () => {
+    await recordStripeSale(session());
+    await saveStripeSaleStock(SESSION_ID, { applied: false, oversold: true });
+    await saveStripeSaleStock(SESSION_ID, { applied: true, oversold: false });
+
+    expect(fake.get(SALE_PATH)).toMatchObject({ oversold: true, stockApplied: true });
+  });
+
+  it("rejects, writing nothing, when the sale does not exist", async () => {
+    await expect(
+      saveStripeSaleStock("cs_test_missing", { applied: true, oversold: false }),
+    ).rejects.toThrow();
+    expect(fake.committed).toHaveLength(0);
+  });
+
+  it("rejects when Firebase isn't configured: the webhook answers 500 and Stripe retries", async () => {
+    configured = false;
+
+    await expect(
+      saveStripeSaleStock(SESSION_ID, { applied: true, oversold: false }),
+    ).rejects.toThrow();
+  });
+
+  it("reads only a literal true as applied: a hand-edited flag is not one", async () => {
+    fake.seed(SALE_PATH, { stockApplied: "yes" });
+
+    await expect(readStripeSaleStock(SESSION_ID)).resolves.toEqual({ applied: false });
   });
 });
 

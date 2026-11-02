@@ -38,9 +38,10 @@
   },
   "Product": {
     "available": "available",
-    "sold": "sold",
+    "sold": "sold out",
     "uniquePiece": "Unique piece",
-    "soldOut": "Unique piece — sold",
+    "remaining": "{count} left",
+    "soldOut": "Sold out",
     "viewDetails": "View piece",
     "thumbnail": "Image {number}"
   },
@@ -79,7 +80,8 @@
     "chainLengthLegend": "Chain length",
     "chainLengthChip": "{cm} cm",
     "ringSizeHint": "Choose your size to acquire this piece.",
-    "chainLengthHint": "Choose a chain length to acquire this piece."
+    "chainLengthHint": "Choose a chain length to acquire this piece.",
+    "allInCartHint": "You already have every available piece in your cart."
   },
   "Cart": {
     "title": "Cart",
@@ -89,6 +91,13 @@
     "browseCta": "Go to the shop",
     "remove": "Remove",
     "removeLabel": "Remove {title} from cart",
+    "quantity": "× {count}",
+    "quantityGroup": "Quantity of {title}",
+    "decrease": "Remove one {title}",
+    "increase": "Add one {title}",
+    "onlyLeft": "Only {count} left",
+    "tooLargeNotice": "Your cart is too large to pay for in one go. Remove some pieces or place two orders.",
+    "stockNotice": "Some pieces no longer have that many units available. We adjusted your cart to what is left.",
     "subtotal": "Subtotal",
     "checkout": "Proceed to payment",
     "checkingOut": "Processing…",

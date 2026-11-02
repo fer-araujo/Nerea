@@ -31,10 +31,12 @@ import { RefreshFeeForm } from "../app/admin/(panel)/ventas/RefreshFeeForm";
 import { VoidSaleForm } from "../app/admin/(panel)/ventas/VoidSaleForm";
 
 const TODAY = "2026-10-02";
+// The ring is a design made in several copies (3 in stock); the others are
+// one-of-one pieces.
 const PIECES: SalePiece[] = [
-  { handle: "anillo-luna", title: "Anillo Luna", price: 185_000 },
-  { handle: "aretes-sol", title: "Aretes Sol", price: 90_000 },
-  { handle: "dije-mar", title: "Dije Mar", price: 120_050 },
+  { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, stock: 3 },
+  { handle: "aretes-sol", title: "Aretes Sol", price: 90_000, stock: 1 },
+  { handle: "dije-mar", title: "Dije Mar", price: 120_050, stock: 1 },
 ];
 
 const addButton = () => screen.getByRole("button", { name: "+ Agregar otra pieza" });
@@ -48,8 +50,12 @@ function chooseRow(index: number, handle: string) {
   fireEvent.change(group.getByLabelText("Pieza"), { target: { value: handle } });
 }
 
+function quantityOf(index: number) {
+  return within(rows()[index]).getByLabelText("Cantidad");
+}
+
 function priceOf(index: number) {
-  return within(rows()[index]).getByLabelText("Precio (MXN)");
+  return within(rows()[index]).getByLabelText("Precio por pieza (MXN)");
 }
 
 beforeEach(() => {
@@ -57,13 +63,14 @@ beforeEach(() => {
 });
 
 describe("ManualSaleForm: the piece rows", () => {
-  it("starts with one row, a date of today that cannot be in the future, and the store checkbox on", () => {
+  it("starts with one row, a date of today that cannot be in the future, and 'Descontar de la tienda' on", () => {
     render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
 
     expect(rows()).toHaveLength(1);
     expect(screen.getByLabelText("Fecha")).toHaveValue(TODAY);
     expect(screen.getByLabelText("Fecha")).toHaveAttribute("max", TODAY);
-    expect(screen.getByLabelText("Marcar como vendida en la tienda")).toBeChecked();
+    expect(screen.getByLabelText("Descontar de la tienda")).toBeChecked();
+    expect(quantityOf(0)).toHaveValue(1);
   });
 
   it("starts the price at the catalog's, in pesos, when a piece is chosen", () => {
@@ -104,8 +111,13 @@ describe("ManualSaleForm: the piece rows", () => {
     const first = within(rows()[0]).getAllByRole("option").map((option) => option.textContent);
 
     expect(second).toEqual(["Elige una pieza", "Aretes Sol", "Dije Mar"]);
-    // A row still offers its own choice.
-    expect(first).toEqual(["Elige una pieza", "Anillo Luna", "Aretes Sol", "Dije Mar"]);
+    // A row still offers its own choice, and a piece in several copies says how many.
+    expect(first).toEqual([
+      "Elige una pieza",
+      "Anillo Luna (3 disponibles)",
+      "Aretes Sol",
+      "Dije Mar",
+    ]);
   });
 
   it("adds and removes rows, but never removes the last one", () => {
@@ -151,6 +163,7 @@ describe("ManualSaleForm: the piece rows", () => {
       handle: `pieza-${index}`,
       title: `Pieza ${index}`,
       price: 100,
+      stock: 1,
     }));
     render(<ManualSaleForm pieces={many} today={TODAY} />);
 
@@ -163,9 +176,51 @@ describe("ManualSaleForm: the piece rows", () => {
   });
 
   it("falls back to the handle for a piece with no title", () => {
-    render(<ManualSaleForm pieces={[{ handle: "sin-titulo", title: "", price: 100 }]} today={TODAY} />);
+    render(<ManualSaleForm pieces={[{ handle: "sin-titulo", title: "", price: 100, stock: 1 }]} today={TODAY} />);
 
     expect(within(rows()[0]).getByRole("option", { name: "sin-titulo" })).toBeInTheDocument();
+  });
+});
+
+describe("ManualSaleForm: quantity", () => {
+  it("is a required whole number from 1, capped at the stock of the chosen piece", () => {
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+
+    expect(quantityOf(0)).toBeRequired();
+    expect(quantityOf(0)).toHaveAttribute("type", "number");
+    expect(quantityOf(0)).toHaveAttribute("min", "1");
+    expect(quantityOf(0)).toHaveAttribute("step", "1");
+
+    chooseRow(0, "anillo-luna");
+    expect(quantityOf(0)).toHaveAttribute("max", "3");
+
+    chooseRow(0, "aretes-sol");
+    expect(quantityOf(0)).toHaveAttribute("max", "1");
+  });
+
+  it("goes back to 1 when another piece is chosen", () => {
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    chooseRow(0, "anillo-luna");
+    fireEvent.change(quantityOf(0), { target: { value: "3" } });
+
+    chooseRow(0, "aretes-sol");
+
+    expect(quantityOf(0)).toHaveValue(1);
+  });
+
+  it("keeps each row's own quantity when another row is removed", () => {
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    fireEvent.click(addButton());
+    fireEvent.click(addButton());
+    chooseRow(0, "anillo-luna");
+    chooseRow(1, "aretes-sol");
+    chooseRow(2, "dije-mar");
+    fireEvent.change(quantityOf(0), { target: { value: "2" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Quitar pieza 2" }));
+
+    expect(quantityOf(0)).toHaveValue(2);
+    expect(quantityOf(1)).toHaveValue(1);
   });
 });
 
@@ -185,6 +240,30 @@ describe("ManualSaleForm: live total", () => {
     expect(total()).toHaveTextContent("$2,900.50");
   });
 
+  it("multiplies each row's price by its quantity", () => {
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    fireEvent.click(addButton());
+    chooseRow(0, "anillo-luna");
+    chooseRow(1, "aretes-sol");
+
+    fireEvent.change(quantityOf(0), { target: { value: "3" } });
+
+    // 3 x $1,850.00 + 1 x $900.00
+    expect(subtotal()).toHaveTextContent("$6,450.00");
+    expect(total()).toHaveTextContent("$6,450.00");
+  });
+
+  it("counts a quantity that is not a whole number yet as nothing, instead of showing garbage", () => {
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    chooseRow(0, "anillo-luna");
+
+    fireEvent.change(quantityOf(0), { target: { value: "1.5" } });
+    expect(total()).toHaveTextContent("$0.00");
+
+    fireEvent.change(quantityOf(0), { target: { value: "" } });
+    expect(total()).toHaveTextContent("$0.00");
+  });
+
   it("ignores an amount that is not yet valid instead of showing garbage", () => {
     render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
     chooseRow(0, "anillo-luna");
@@ -200,6 +279,7 @@ describe("ManualSaleForm: submitting", () => {
     fireEvent.click(addButton());
     chooseRow(0, "anillo-luna");
     fireEvent.change(priceOf(0), { target: { value: "1500" } });
+    fireEvent.change(quantityOf(0), { target: { value: "2" } });
     fireEvent.change(within(rows()[0]).getByLabelText("Opción (opcional)"), {
       target: { value: "Talla 7" },
     });
@@ -212,7 +292,7 @@ describe("ManualSaleForm: submitting", () => {
     });
   }
 
-  it("posts one value per row for each repeated field, plus the header fields and the checkbox", async () => {
+  it("posts one value per row for each repeated field, plus the header fields and 'Descontar de la tienda'", async () => {
     recordActionMock.mockResolvedValue({ ok: true });
     render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
     fillValidSale();
@@ -224,9 +304,10 @@ describe("ManualSaleForm: submitting", () => {
     expect(formData.get("date")).toBe(TODAY);
     expect(formData.get("shipping")).toBe("150");
     expect(formData.get("note")).toBe("Entrega en persona");
-    expect(formData.get("markSold")).toBe("on");
+    expect(formData.get("decrementStock")).toBe("on");
     expect(formData.getAll("itemHandle")).toEqual(["anillo-luna", "aretes-sol"]);
     expect(formData.getAll("itemPrice")).toEqual(["1500", "900.00"]);
+    expect(formData.getAll("itemQuantity")).toEqual(["2", "1"]);
     expect(formData.getAll("itemOption")).toEqual(["Talla 7", ""]);
   });
 
@@ -305,24 +386,33 @@ describe("ManualSaleForm: submitting", () => {
     expect(screen.getByLabelText("Comisión (terminal, MXN, opcional)")).toHaveValue(null);
   });
 
-  it("posts no markSold at all when the store checkbox is unticked", async () => {
+  it("posts no decrementStock at all when the checkbox is unticked", async () => {
     recordActionMock.mockResolvedValue({ ok: true });
     render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
     chooseRow(0, "anillo-luna");
-    fireEvent.click(screen.getByLabelText("Marcar como vendida en la tienda"));
+    fireEvent.click(screen.getByLabelText("Descontar de la tienda"));
 
     fireEvent.click(submitButton());
 
     await waitFor(() => expect(recordActionMock).toHaveBeenCalledTimes(1));
     const [formData] = recordActionMock.mock.calls[0] as [FormData];
+    expect(formData.has("decrementStock")).toBe(false);
     expect(formData.has("markSold")).toBe(false);
+  });
+
+  it("explains what 'Descontar de la tienda' does in plain words", () => {
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+
+    expect(screen.getByLabelText("Descontar de la tienda")).toHaveAccessibleDescription(
+      /Resta las piezas vendidas de las disponibles en la tienda en línea/,
+    );
   });
 
   it("confirms success and clears the form back to one empty row, today and the checkbox on", async () => {
     recordActionMock.mockResolvedValue({ ok: true });
     render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
     fillValidSale();
-    fireEvent.click(screen.getByLabelText("Marcar como vendida en la tienda"));
+    fireEvent.click(screen.getByLabelText("Descontar de la tienda"));
 
     fireEvent.click(submitButton());
 
@@ -330,10 +420,11 @@ describe("ManualSaleForm: submitting", () => {
     expect(rows()).toHaveLength(1);
     expect(within(rows()[0]).getByLabelText("Pieza")).toHaveValue("");
     expect(priceOf(0)).toHaveValue(null);
+    expect(quantityOf(0)).toHaveValue(1);
     expect(screen.getByLabelText("Envío cobrado (MXN, opcional)")).toHaveValue(null);
     expect(screen.getByLabelText("Nota (opcional)")).toHaveValue("");
     expect(screen.getByLabelText("Fecha")).toHaveValue(TODAY);
-    expect(screen.getByLabelText("Marcar como vendida en la tienda")).toBeChecked();
+    expect(screen.getByLabelText("Descontar de la tienda")).toBeChecked();
     expect(total()).toHaveTextContent("$0.00");
   });
 
@@ -342,7 +433,7 @@ describe("ManualSaleForm: submitting", () => {
       ok: true,
       warning: {
         code: "store-not-updated",
-        message: "La venta quedó registrada, pero no se pudo marcar como vendida en la tienda la pieza «Anillo Luna». Márcala como vendida desde Studio.",
+        message: "La venta quedó registrada, pero no se pudo descontar de la tienda la pieza «Anillo Luna». Ajusta sus piezas disponibles desde Studio.",
       },
     });
     render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
@@ -356,18 +447,37 @@ describe("ManualSaleForm: submitting", () => {
     expect(rows()).toHaveLength(1);
   });
 
-  it("shows the server's message and KEEPS what was typed when it fails", async () => {
+  it("shows the oversold warning next to the confirmation, and still clears", async () => {
     recordActionMock.mockResolvedValue({
-      ok: false,
-      error: "piece-unavailable",
-      message: "Una de las piezas ya está vendida. Recarga la página para ver las que siguen disponibles.",
+      ok: true,
+      warning: {
+        code: "oversold",
+        message:
+          "Se vendieron más piezas de «Anillo Luna» de las que había en la tienda: quedó en 0 y la venta lleva la marca «Revisar: sobreventa».",
+      },
     });
     render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
     fillValidSale();
 
     fireEvent.click(submitButton());
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("ya está vendida");
+    expect(await screen.findByRole("status")).toHaveTextContent("Venta registrada.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Revisar: sobreventa");
+    expect(rows()).toHaveLength(1);
+  });
+
+  it("shows the server's message and KEEPS what was typed when it fails", async () => {
+    recordActionMock.mockResolvedValue({
+      ok: false,
+      error: "piece-unavailable",
+      message: "Una de las piezas ya está agotada o no tiene tantas piezas disponibles. Recarga la página para ver cuántas quedan.",
+    });
+    render(<ManualSaleForm pieces={PIECES} today={TODAY} />);
+    fillValidSale();
+
+    fireEvent.click(submitButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("tantas piezas disponibles");
     expect(rows()).toHaveLength(2);
     expect(priceOf(0)).toHaveValue(1500);
     expect(screen.getByLabelText("Nota (opcional)")).toHaveValue("Entrega en persona");

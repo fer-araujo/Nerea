@@ -62,6 +62,7 @@ function piece(handle: string, collectionSlugs: string[]): ProductSummary {
     title: `Pieza ${handle}`,
     price: { amount: 185000, currency: "MXN" },
     availability: "available",
+    stock: 1,
     cover: null,
     categorySlug: "anillos",
     collectionSlugs,

@@ -104,6 +104,17 @@ export function readCentavos(value: unknown): number {
   return readOptionalCentavos(value) ?? 0;
 }
 
+/**
+ * A unit count: a whole number from 1, or `fallback` for anything else. A
+ * document from before quantities existed has none, and a line then counts
+ * once.
+ */
+export function readQuantity(value: unknown, fallback = 1): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1
+    ? value
+    : fallback;
+}
+
 /** Reads a field only when it is one of the allowed values. */
 export function readEnum<T extends string>(
   value: unknown,

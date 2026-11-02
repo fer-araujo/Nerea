@@ -1,8 +1,9 @@
 "use client";
 
 import { useId } from "react";
+import { useTranslations } from "next-intl";
 import type { ProductSummary, SelectedOption } from "@/lib/commerce/types";
-import { useCart } from "@/lib/cart/cart-context";
+import { quantityOfHandle, useCart } from "@/lib/cart/cart-context";
 import { cn } from "@/lib/cn";
 
 interface AcquireButtonProps {
@@ -12,7 +13,10 @@ interface AcquireButtonProps {
    * plus the chosen option's extra (see PurchasePanel). It is display-only;
    * the real charge is re-priced server-side by `checkoutAction`.
    */
-  product: Pick<ProductSummary, "handle" | "title" | "price" | "cover">;
+  product: Pick<
+    ProductSummary,
+    "handle" | "title" | "price" | "cover" | "stock"
+  >;
   /** The shopper's choice, stored on the cart line; omitted for pieces without one. */
   option?: SelectedOption;
   /** True while a required option has not been chosen yet. */
@@ -31,7 +35,9 @@ interface AcquireButtonProps {
 // drawer"). Never rendered for a sold piece; the product detail page already
 // gates that above this component (see app/[locale]/products/[handle]/
 // page.tsx), so there is no availability check here — this button's job is
-// the add-to-cart action, held back while a required option is unchosen.
+// the add-to-cart action, held back while a required option is unchosen and
+// once the cart already holds every piece the shop has of this design
+// (display-only: the server re-checks the live stock at checkout).
 export function AcquireButton({
   label,
   product,
@@ -40,15 +46,20 @@ export function AcquireButton({
   hint,
   className,
 }: AcquireButtonProps) {
-  const { addItem } = useCart();
+  const t = useTranslations("ProductDetail");
+  const { items, addItem } = useCart();
   const hintId = useId();
-  const showHint = disabled && Boolean(hint);
+  const allInCart = quantityOfHandle(items, product.handle) >= product.stock;
+  const isDisabled = disabled || allInCart;
+  // A missing choice is the more actionable reason, so it is the one shown.
+  const shownHint = disabled ? hint : allInCart ? t("allInCartHint") : undefined;
+  const showHint = isDisabled && Boolean(shownHint);
 
   return (
     <>
       <button
         type="button"
-        disabled={disabled}
+        disabled={isDisabled}
         aria-describedby={showHint ? hintId : undefined}
         onClick={() => addItem({ ...product, option })}
         className={cn(
@@ -61,7 +72,7 @@ export function AcquireButton({
       </button>
       {showHint && (
         <p id={hintId} className="font-mono text-xs leading-relaxed text-graphite">
-          {hint}
+          {shownHint}
         </p>
       )}
     </>

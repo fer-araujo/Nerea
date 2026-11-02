@@ -18,7 +18,7 @@ import {
   parseIsoDate,
 } from "@/lib/admin/domain/periods";
 import { MATERIAL_UNITS } from "@/lib/admin/domain/quantity";
-import { MAX_SALE_ITEMS } from "@/lib/admin/domain/sales";
+import { MAX_ITEM_QUANTITY, MAX_SALE_ITEMS } from "@/lib/admin/domain/sales";
 
 // Boundary validation for the inventory Server Actions. A Server Action is a
 // public POST endpoint, so nothing in a FormData is trusted: every field is
@@ -85,6 +85,19 @@ function moneyText(label: string, { max }: { max: number }) {
     .transform((text) => pesosToCentavos(Number(text)))
     .refine((centavos) => centavos <= pesosToCentavos(max), {
       error: `${label}: el monto es demasiado grande.`,
+    });
+}
+
+/** A unit count typed as digits ("3"): a whole number from 1 up to `max`. */
+function wholeQuantityText(label: string, { max }: { max: number }) {
+  return z
+    .string({ error: `${label}: escribe un número entero.` })
+    .trim()
+    .regex(/^[0-9]{1,6}$/, { error: `${label}: escribe un número entero.` })
+    .transform(Number)
+    .refine((value) => value >= 1, { error: `${label}: debe ser al menos 1.` })
+    .refine((value) => value <= max, {
+      error: `${label}: el valor es demasiado grande.`,
     });
 }
 
@@ -345,6 +358,9 @@ const saleItemSchema = z.object({
   // Editable on purpose (a discount), so it is validated like any amount; the
   // catalog price is only the form's starting value.
   price: moneyText("Precio", { max: MAX_PIECE_COST_PESOS }),
+  // Units of this piece. Whether the shop HAS that many is checked against the
+  // catalog by the data layer, never trusted from here.
+  quantity: wholeQuantityText("Cantidad", { max: MAX_ITEM_QUANTITY }),
   option: optionalText("Opción", 60),
 });
 
@@ -369,7 +385,8 @@ export const recordManualSaleSchema = z
       moneyText("Comisión", { max: 100_000 }),
     ),
     note: optionalText("Nota", 300),
-    markSold: z.boolean(),
+    // "Descontar de la tienda": take the sold units off the stock in Sanity.
+    decrementStock: z.boolean(),
     items: z
       .array(saleItemSchema, { error: "Agrega al menos una pieza." })
       .min(1, { error: "Agrega al menos una pieza." })

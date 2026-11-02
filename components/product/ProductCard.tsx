@@ -47,7 +47,10 @@ export function ProductCard({ product, priority, index, className }: ProductCard
         </div>
 
         <div className="mt-3 border-t border-line pt-2.5">
-          <AvailabilityBadge availability={product.availability} />
+          <AvailabilityBadge
+            availability={product.availability}
+            stock={product.stock}
+          />
         </div>
 
         <div className="mt-2 flex items-baseline justify-between gap-3">

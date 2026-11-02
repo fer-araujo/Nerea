@@ -3,10 +3,11 @@ import { FakeFirestore, type FakeTransaction } from "@/tests/helpers/fake-firest
 
 type TransactionBody = (tx: FakeTransaction) => Promise<unknown>;
 
-// The route, the sale recorder and the sales document builder all run for
-// real here; only the edges are faked (Firestore, Sanity's catalog and write
-// path, Stripe's signature check). That is what lets "a duplicate delivery
-// does not double", "a failed write is a 500 and the retry lands once" and
+// The route, the sale recorder, the stock-progress helpers and the sales
+// document builder all run for real here; only the edges are faked (Firestore,
+// Sanity's catalog and write path, Stripe's signature check). That is what lets
+// "a duplicate delivery does not double", "a failed write is a 500 and the
+// retry lands once", "a redelivery never takes the units off twice" and
 // "nothing personal is stored" be asserted on what ends up in the database.
 // The route's own branching is covered with a mocked recorder in
 // tests/stripe-webhook.test.ts.
@@ -35,12 +36,12 @@ vi.mock("@/lib/commerce/stripe/client", () => ({
   getStripeClient: () => getStripeClientMock(),
 }));
 
-const markProductsSoldMock = vi.fn();
-vi.mock("@/lib/commerce/sanity/mark-sold", () => ({
-  markProductsSold: (...args: unknown[]) => markProductsSoldMock(...args),
+const decrementStockMock = vi.fn();
+vi.mock("@/lib/commerce/sanity/stock", () => ({
+  decrementStock: (...args: unknown[]) => decrementStockMock(...args),
 }));
 
-// The route expires the cached catalog once a piece is marked sold; the real
+// The route expires the cached catalog once units are taken off; the real
 // revalidateTag needs a live Next request context.
 const revalidateTagMock = vi.fn();
 vi.mock("next/cache", () => ({
@@ -71,8 +72,14 @@ const PII_FRAGMENTS = [
   "cus_PII123",
 ];
 
-// What markProductsSold answers when it did its job.
-const MARKED = { marked: ["anillo-luna"], missing: [], failed: [] };
+// What decrementStock answers when it did its job.
+const DONE = {
+  decremented: ["anillo-luna"],
+  missing: [],
+  failed: [],
+  oversold: [],
+  alreadyApplied: [],
+};
 
 function completedSession(overrides: Record<string, unknown> = {}) {
   return {
@@ -132,7 +139,7 @@ beforeEach(() => {
       },
     },
   });
-  markProductsSoldMock.mockResolvedValue(MARKED);
+  decrementStockMock.mockResolvedValue(DONE);
   getProductByHandleMock.mockResolvedValue({
     handle: "anillo-luna",
     title: "Anillo Luna",
@@ -151,19 +158,25 @@ afterEach(() => {
 });
 
 describe("webhook -> sales ledger: recording", () => {
-  it("records a completed checkout once, as stripe_<session id>, after marking the piece sold", async () => {
+  it("records a completed checkout once, as stripe_<session id>, then takes its unit off the stock", async () => {
     fake.seed("pieces/anillo-luna", { costs: { metal: 40_000, stones: 15_000, other: 5_000 } });
 
     const response = await deliver();
 
     expect(response.status).toBe(200);
-    expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna"]);
+    expect(decrementStockMock).toHaveBeenCalledWith([{ handle: "anillo-luna", qty: 1 }], SESSION_ID);
     expect(fake.directChildren("sales").map((entry) => entry.path)).toEqual([SALE_PATH]);
     expect(fake.get(SALE_PATH)).toMatchObject({
       source: "stripe",
       status: "active",
       items: [
-        { handle: "anillo-luna", title: "Anillo Luna", price: 185_000, option: "Talla 7" },
+        {
+          handle: "anillo-luna",
+          title: "Anillo Luna",
+          price: 185_000,
+          quantity: 1,
+          option: "Talla 7",
+        },
       ],
       subtotal: 185_000,
       shipping: 15_000,
@@ -172,10 +185,12 @@ describe("webhook -> sales ledger: recording", () => {
       costOfGoods: 60_000,
       costPending: false,
       stripeSessionId: SESSION_ID,
+      // Every unit is off the stock: a redelivery has nothing left to do.
+      stockApplied: true,
     });
   });
 
-  it("expires the cached catalog right after the piece is marked sold, so the shop stops offering it", async () => {
+  it("expires the cached catalog right after the units are taken off, so the shop stops offering them", async () => {
     await deliver();
 
     expect(revalidateTagMock).toHaveBeenCalledTimes(1);
@@ -203,7 +218,7 @@ describe("webhook -> sales ledger: recording", () => {
     const response = await deliver();
 
     expect(response.status).toBe(200);
-    expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna"]);
+    expect(decrementStockMock).toHaveBeenCalledWith([{ handle: "anillo-luna", qty: 1 }], SESSION_ID);
     const stored = fake.get(SALE_PATH);
     expect(stored).toMatchObject({ source: "stripe", total: 200_000, feePending: true });
     expect(stored).not.toHaveProperty("stripeFee");
@@ -219,24 +234,25 @@ describe("webhook -> sales ledger: recording", () => {
     expect(await response.json()).toEqual({ received: true });
   });
 
-  it("marks sold BEFORE it records, so a failing ledger can never leave a paid piece on sale", async () => {
+  it("records the sale BEFORE it takes the units off: the sale document is what keeps a redelivery from doing it twice", async () => {
     const order: string[] = [];
-    markProductsSoldMock.mockImplementation(async () => {
-      order.push("mark-sold");
-      return MARKED;
+    decrementStockMock.mockImplementation(async () => {
+      order.push("decrement-stock");
+      return DONE;
     });
     const run = fake.runTransaction.bind(fake);
     vi.spyOn(fake, "runTransaction").mockImplementation((async (update: TransactionBody) => {
-      order.push("record-sale");
+      // Only the sale's creation (not the progress update after the stock).
+      if (order.length === 0) order.push("record-sale");
       return run(update);
     }) as FakeFirestore["runTransaction"]);
 
     await deliver();
 
-    expect(order).toEqual(["mark-sold", "record-sale"]);
+    expect(order).toEqual(["record-sale", "decrement-stock"]);
   });
 
-  it("does NOT double the sale when Stripe delivers the same event twice", async () => {
+  it("does NOT double the sale, or the stock, when Stripe delivers the same event twice", async () => {
     const first = await deliver();
     const afterFirst = fake.get(SALE_PATH);
     const second = await deliver();
@@ -244,10 +260,70 @@ describe("webhook -> sales ledger: recording", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(fake.directChildren("sales")).toHaveLength(1);
-    expect(fake.opsMatching(/^sales\//)).toHaveLength(1);
+    // The sale is created once and updated once (the stock marker): the second
+    // delivery writes nothing at all.
+    expect(fake.opsMatching(/^sales\//)).toHaveLength(2);
     expect(fake.get(SALE_PATH)).toEqual(afterFirst);
-    // Marking sold is idempotent by design, so it is simply run again.
-    expect(markProductsSoldMock).toHaveBeenCalledTimes(2);
+    // Taking units off is NOT idempotent, so the marker keeps it from running again.
+    expect(decrementStockMock).toHaveBeenCalledTimes(1);
+    expect(revalidateTagMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("records a multi-quantity checkout: per-line quantity, cost times quantity, the units off the stock", async () => {
+    fake.seed("pieces/anillo-luna", { costs: { metal: 40_000, stones: 15_000, other: 5_000 } });
+    decrementStockMock.mockResolvedValue({ ...DONE, decremented: ["anillo-luna"] });
+
+    const response = await deliver(
+      completedSession({
+        amount_subtotal: 555_000,
+        amount_total: 570_000,
+        metadata: {
+          handles: "anillo-luna",
+          items: "anillo-luna*2|size=7;anillo-luna*1|size=6",
+          options: "anillo-luna:size=7,anillo-luna:size=6",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    // ONE decrement for the design, its two sizes added up.
+    expect(decrementStockMock).toHaveBeenCalledWith([{ handle: "anillo-luna", qty: 3 }], SESSION_ID);
+    expect(fake.get(SALE_PATH)).toMatchObject({
+      items: [
+        { handle: "anillo-luna", price: 185_000, quantity: 2, option: "Talla 7" },
+        { handle: "anillo-luna", price: 185_000, quantity: 1, option: "Talla 6" },
+      ],
+      subtotal: 555_000,
+      // 3 units x 60_000 of cost each.
+      costOfGoods: 180_000,
+      costPending: false,
+    });
+    // One catalog read for the design, however many sizes.
+    expect(getProductByHandleMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still reads a legacy session (handles and options only) as one unit per piece", async () => {
+    const response = await deliver(completedSession());
+
+    expect(response.status).toBe(200);
+    expect(fake.get(SALE_PATH)).toMatchObject({
+      items: [{ handle: "anillo-luna", quantity: 1, option: "Talla 7" }],
+    });
+  });
+
+  it("flags the sale 'oversold', and still answers 200, when more units were sold than the shop had", async () => {
+    decrementStockMock.mockResolvedValue({ ...DONE, oversold: ["anillo-luna"] });
+
+    const response = await deliver();
+
+    expect(response.status).toBe(200);
+    expect(fake.get(SALE_PATH)).toMatchObject({ stockApplied: true, oversold: true });
+  });
+
+  it("does not flag a sale oversold when nothing went below zero", async () => {
+    await deliver();
+
+    expect(fake.get(SALE_PATH)).not.toHaveProperty("oversold");
   });
 
   it("records nothing for a session this storefront did not create (no pieces in its metadata)", async () => {
@@ -270,8 +346,8 @@ describe("webhook -> sales ledger: failures", () => {
 
     expect(failed.status).toBe(500);
     expect(await failed.json()).toEqual({ error: "sale not recorded" });
-    // The piece was still marked sold: a paid piece never waits for the ledger.
-    expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna"]);
+    // The sale document is the idempotency token: no sale, no decrement yet.
+    expect(decrementStockMock).not.toHaveBeenCalled();
     expect(fake.directChildren("sales")).toHaveLength(0);
 
     spy.mockRestore();
@@ -279,6 +355,7 @@ describe("webhook -> sales ledger: failures", () => {
 
     expect(retried.status).toBe(200);
     expect(fake.directChildren("sales")).toHaveLength(1);
+    expect(decrementStockMock).toHaveBeenCalledTimes(1);
   });
 
   it("survives a write that LANDED but reported an error: the retry is a harmless duplicate", async () => {
@@ -295,7 +372,12 @@ describe("webhook -> sales ledger: failures", () => {
     expect(failed.status).toBe(500);
     expect(retried.status).toBe(200);
     expect(fake.directChildren("sales")).toHaveLength(1);
-    expect(fake.opsMatching(/^sales\//)).toHaveLength(1);
+    // The sale (created once, by the first attempt) and the stock marker.
+    expect(fake.opsMatching(/^sales\//)).toHaveLength(2);
+    // The first attempt failed before the stock; the retry found the sale
+    // without a marker and took the unit off, once.
+    expect(decrementStockMock).toHaveBeenCalledTimes(1);
+    expect(fake.get(SALE_PATH)).toMatchObject({ stockApplied: true });
   });
 
   it("answers 500 when the catalog cannot be read, rather than record a sale with guessed titles", async () => {
@@ -330,8 +412,8 @@ describe("webhook -> sales ledger: failures", () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "sale ledger not configured" });
-    // The piece was still taken off the shelf, and nothing was written.
-    expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna"]);
+    // Nothing was written, and the stock waits for the sale to exist.
+    expect(decrementStockMock).not.toHaveBeenCalled();
     expect(fake.committed).toHaveLength(0);
     expect(error).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledWith(
@@ -352,38 +434,104 @@ describe("webhook -> sales ledger: failures", () => {
     expect(fake.directChildren("sales")).toHaveLength(1);
   });
 
-  it("answers 500 when a piece could not be marked sold, yet still records the sale; the retry then lands once", async () => {
+  it("answers 500 when a piece's stock could not be updated, yet keeps the sale; the retry then lands once", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    markProductsSoldMock.mockResolvedValueOnce({
-      marked: [],
+    decrementStockMock.mockResolvedValueOnce({
+      decremented: [],
       missing: [],
       failed: ["anillo-luna"],
+      oversold: [],
     });
 
     const failed = await deliver();
 
     expect(failed.status).toBe(500);
-    expect(await failed.json()).toEqual({ error: "pieces not marked sold" });
-    // The money arrived: the ledger does not wait for Sanity's write path.
+    expect(await failed.json()).toEqual({ error: "stock not updated" });
+    // The money arrived: the sale is on record, and says the stock is NOT done.
     expect(fake.directChildren("sales")).toHaveLength(1);
+    expect(fake.get(SALE_PATH)).toMatchObject({ stockApplied: false });
     expect(error).toHaveBeenCalledWith(
-      "[stripe] Pieces could not be marked sold; answering 500 so Stripe retries.",
+      "[stripe] Stock could not be updated; answering 500 so Stripe retries.",
     );
 
-    // Sanity is back: the redelivered event marks the piece, and the sale is a
-    // harmless duplicate.
+    // Sanity is back: the redelivered event takes the unit off, and the sale is
+    // a harmless duplicate.
     const retried = await deliver();
 
     expect(retried.status).toBe(200);
-    expect(markProductsSoldMock).toHaveBeenCalledTimes(2);
+    expect(decrementStockMock).toHaveBeenCalledTimes(2);
     expect(fake.directChildren("sales")).toHaveLength(1);
-    expect(fake.opsMatching(/^sales\//)).toHaveLength(1);
+    expect(fake.get(SALE_PATH)).toMatchObject({ stockApplied: true });
+
+    // And from here on a further redelivery does nothing.
+    const again = await deliver();
+    expect(again.status).toBe(200);
+    expect(decrementStockMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("after a PARTIAL failure, asks for every piece again: Sanity's markers skip the one that landed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    getProductByHandleMock.mockImplementation(async (handle: string) => ({
+      handle,
+      title: handle,
+      description: "",
+      price: { amount: 100_000, currency: "MXN" },
+      availability: "sold",
+      stock: 0,
+      cover: null,
+      media: [],
+      options: { kind: "none" },
+    }));
+    const session = completedSession({
+      amount_subtotal: 300_000,
+      amount_total: 300_000,
+      shipping_cost: { amount_total: 0 },
+      metadata: { handles: "uno,dos", items: "uno*2;dos*1" },
+    });
+    const ASKED = [
+      { handle: "uno", qty: 2 },
+      { handle: "dos", qty: 1 },
+    ];
+    decrementStockMock.mockResolvedValueOnce({
+      decremented: ["uno"],
+      missing: [],
+      failed: ["dos"],
+      oversold: [],
+      alreadyApplied: [],
+    });
+
+    const failed = await deliver(session);
+
+    expect(failed.status).toBe(500);
+    expect(decrementStockMock).toHaveBeenLastCalledWith(ASKED, SESSION_ID);
+    expect(fake.get(SALE_PATH)).toMatchObject({ stockApplied: false });
+
+    decrementStockMock.mockResolvedValueOnce({
+      decremented: ["uno", "dos"],
+      missing: [],
+      failed: [],
+      oversold: [],
+      alreadyApplied: ["uno"],
+    });
+    const retried = await deliver(session);
+
+    expect(retried.status).toBe(200);
+    // The same request: it is decrementStock's markers that skip "uno", so the
+    // webhook needs no bookkeeping of its own about which piece landed.
+    expect(decrementStockMock).toHaveBeenLastCalledWith(ASKED, SESSION_ID);
+    expect(fake.get(SALE_PATH)).toMatchObject({ stockApplied: true });
+    expect(fake.get(SALE_PATH)).not.toHaveProperty("stockDone");
   });
 
   it("answers 500 for every paid delivery while the Sanity write token is missing, so it is seen in Stripe", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    // markProductsSold reports a missing token as every piece failed.
-    markProductsSoldMock.mockResolvedValue({ marked: [], missing: [], failed: ["anillo-luna"] });
+    // decrementStock reports a missing token as every piece failed.
+    decrementStockMock.mockResolvedValue({
+      decremented: [],
+      missing: [],
+      failed: ["anillo-luna"],
+      oversold: [],
+    });
 
     const first = await deliver();
     const second = await deliver();
@@ -394,7 +542,12 @@ describe("webhook -> sales ledger: failures", () => {
   });
 
   it("does not treat a product deleted from Sanity as a failure", async () => {
-    markProductsSoldMock.mockResolvedValue({ marked: [], missing: ["anillo-luna"], failed: [] });
+    decrementStockMock.mockResolvedValue({
+      decremented: [],
+      missing: ["anillo-luna"],
+      failed: [],
+      oversold: [],
+    });
 
     const response = await deliver();
 
@@ -408,7 +561,7 @@ describe("webhook -> sales ledger: pay before sell", () => {
     const response = await deliver(completedSession({ payment_status: "unpaid" }));
 
     expect(response.status).toBe(200);
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
     expect(getProductByHandleMock).not.toHaveBeenCalled();
     expect(fake.committed).toHaveLength(0);
   });
@@ -429,7 +582,8 @@ describe("webhook -> sales ledger: pay before sell", () => {
     expect(unpaid.status).toBe(200);
     expect(paid.status).toBe(200);
     expect(redelivered.status).toBe(200);
-    expect(markProductsSoldMock).toHaveBeenCalledWith(["anillo-luna"]);
+    expect(decrementStockMock).toHaveBeenCalledTimes(1);
+    expect(decrementStockMock).toHaveBeenCalledWith([{ handle: "anillo-luna", qty: 1 }], SESSION_ID);
     expect(fake.directChildren("sales").map((entry) => entry.path)).toEqual([SALE_PATH]);
   });
 
@@ -440,7 +594,7 @@ describe("webhook -> sales ledger: pay before sell", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
     expect(fake.committed).toHaveLength(0);
   });
 
@@ -473,7 +627,7 @@ describe("webhook -> sales ledger: the signature gate still comes first", () => 
     );
 
     expect(response.status).toBe(400);
-    expect(markProductsSoldMock).not.toHaveBeenCalled();
+    expect(decrementStockMock).not.toHaveBeenCalled();
     expect(getProductByHandleMock).not.toHaveBeenCalled();
     expect(fake.committed).toHaveLength(0);
   });
@@ -557,6 +711,7 @@ describe("webhook -> sales ledger: no customer data is ever stored", () => {
         "status",
         "stripeFee",
         "stripeNet",
+        "stockApplied",
         "stripeSessionId",
         "subtotal",
         "total",

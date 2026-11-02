@@ -54,6 +54,7 @@ const LINE: CartLineItem = {
   price: { amount: 185000, currency: "MXN" },
   cover: null,
   quantity: 1,
+  stock: 1,
 };
 
 // The authoritative server-side product for LINE.handle — what
@@ -65,6 +66,7 @@ const SERVER_PRODUCT: Product = {
   title: LINE.title,
   price: LINE.price,
   availability: "available",
+  stock: 1,
   cover: null,
   media: [],
   description: "",
@@ -177,16 +179,18 @@ describe("checkoutAction — fresh catalog reads", () => {
 });
 
 describe("checkoutAction — server-side re-pricing", () => {
-  it("re-prices from the authoritative catalog and ignores a tampered client price/title/quantity, then redirects to the returned URL", async () => {
-    // Deliberately tampered: a forged near-zero price, an inflated
-    // quantity, and a spoofed title. None of this may reach Stripe — only
-    // `handle` is trusted from this object.
+  it("re-prices from the authoritative catalog and ignores a tampered client price/title/stock, then redirects to the returned URL", async () => {
+    // Deliberately tampered: a forged near-zero price, an inflated stock
+    // figure, and a spoofed title. None of this may reach Stripe — only
+    // `handle`, `option` and `quantity` are read from this object, and the
+    // last two only as claims to validate.
     const tamperedLine: CartLineItem = {
       handle: LINE.handle,
       title: "HACKED TITLE",
       price: { amount: 1, currency: "MXN" },
       cover: null,
-      quantity: 99,
+      quantity: 1,
+      stock: 99,
     };
     getAvailabilityMock.mockResolvedValue({ [LINE.handle]: "available" });
     getProductByHandleMock.mockResolvedValue(SERVER_PRODUCT);
@@ -219,6 +223,8 @@ describe("checkoutAction — server-side re-pricing", () => {
         // Forwarded so the Stripe webhook can map the payment back to
         // Sanity docs (app/api/stripe/webhook/route.ts).
         handles: [LINE.handle],
+        // What was bought, with quantities: what the webhook sells from.
+        items: [{ handle: LINE.handle, quantity: 1 }],
         // A piece with no option contributes none.
         options: [],
       },
@@ -228,8 +234,9 @@ describe("checkoutAction — server-side re-pricing", () => {
     );
   });
 
-  it("dedupes a repeated handle into a single Stripe line item", async () => {
+  it("adds a repeated identical line into a single Stripe line item, once per handle", async () => {
     getAvailabilityMock.mockResolvedValue({ [LINE.handle]: "available" });
+    getProductByHandleMock.mockResolvedValue({ ...SERVER_PRODUCT, stock: 5 });
     createCheckoutSessionMock.mockResolvedValue(
       "https://checkout.stripe.com/c/test_session",
     );
@@ -238,8 +245,11 @@ describe("checkoutAction — server-side re-pricing", () => {
 
     expect(getProductByHandleMock).toHaveBeenCalledTimes(1);
     const call = createCheckoutSessionMock.mock.calls[0];
-    expect(call[0]).toHaveLength(1);
+    expect(call[0]).toEqual([
+      { name: SERVER_PRODUCT.title, amount: SERVER_PRODUCT.price.amount, quantity: 2 },
+    ]);
     expect(call[1].handles).toEqual([LINE.handle]);
+    expect(call[1].items).toEqual([{ handle: LINE.handle, quantity: 2 }]);
   });
 
   it("blocks checkout without creating a session when the handle is unknown to the catalog", async () => {
@@ -333,6 +343,7 @@ const PENDANT_LINE: CartLineItem = {
   price: PENDANT_PRODUCT.price,
   cover: null,
   quantity: 1,
+  stock: 1,
   option: { kind: "chainLength", lengthCm: 50 },
 };
 
@@ -497,8 +508,8 @@ describe("checkoutAction — purchase options", () => {
     ]);
   });
 
-  it("validates the FIRST line's option when a handle is repeated", async () => {
-    getProductByHandleMock.mockResolvedValue(RING_PRODUCT);
+  it("rejects a repeated handle when ANY of its lines has an invalid option", async () => {
+    getProductByHandleMock.mockResolvedValue({ ...RING_PRODUCT, stock: 5 });
 
     const result = await checkoutAction(
       [LINE, { ...LINE, option: { kind: "ringSize", value: "7" } }],
@@ -717,6 +728,420 @@ describe("checkoutAction — option resolved from the category", () => {
 
     expect(createCheckoutSessionMock).toHaveBeenCalledTimes(1);
     expect(createCheckoutSessionMock.mock.calls[0][1].options).toEqual([]);
+  });
+});
+
+// A design can be made in several copies. The server is the authority on how
+// many there are: it reads the stock uncached and refuses a cart that asks for
+// more, whatever the client's own copy of the number says.
+describe("checkoutAction — quantities and stock", () => {
+  const stocked = (stock: number, product: Product = SERVER_PRODUCT): Product => ({
+    ...product,
+    stock,
+  });
+
+  beforeEach(() => {
+    getAvailabilityMock.mockImplementation(async (handles: string[]) =>
+      Object.fromEntries(handles.map((handle) => [handle, "available"])),
+    );
+    createCheckoutSessionMock.mockResolvedValue(
+      "https://checkout.stripe.com/c/test_session",
+    );
+  });
+
+  it("sends the line's quantity to Stripe at the catalog price, and the items to the webhook", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(5));
+
+    await checkoutAction([{ ...LINE, quantity: 3, stock: 5 }], "es");
+
+    const [lines, session] = createCheckoutSessionMock.mock.calls[0];
+    expect(lines).toEqual([
+      {
+        name: SERVER_PRODUCT.title,
+        amount: SERVER_PRODUCT.price.amount,
+        quantity: 3,
+      },
+    ]);
+    expect(session.handles).toEqual([LINE.handle]);
+    expect(session.items).toEqual([{ handle: LINE.handle, quantity: 3 }]);
+    expect(redirectMock).toHaveBeenCalledWith(
+      "https://checkout.stripe.com/c/test_session",
+    );
+  });
+
+  it("lets a cart take exactly the stock", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(2));
+
+    await checkoutAction([{ ...LINE, quantity: 2 }], "es");
+
+    expect(createCheckoutSessionMock).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionMock.mock.calls[0][0][0].quantity).toBe(2);
+  });
+
+  it("answers insufficient-stock, with what IS available, when the cart asks for one more than the shop has", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(2));
+
+    const result = await checkoutAction(
+      // The client's own stock figure is a stale lie: only the live read counts.
+      [{ ...LINE, quantity: 3, stock: 10 }],
+      "es",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "insufficient-stock",
+      items: [{ handle: LINE.handle, available: 2 }],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("counts every line of one piece (each size) against the same stock", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(3, RING_PRODUCT));
+
+    const result = await checkoutAction(
+      [
+        { ...LINE, quantity: 2, option: { kind: "ringSize", value: "6" } },
+        { ...LINE, quantity: 2, option: { kind: "ringSize", value: "7" } },
+      ],
+      "es",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "insufficient-stock",
+      items: [{ handle: LINE.handle, available: 3 }],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("makes each (piece, option) its own Stripe line item with its own quantity", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(5, RING_PRODUCT));
+
+    await checkoutAction(
+      [
+        { ...LINE, quantity: 2, option: { kind: "ringSize", value: "6" } },
+        { ...LINE, quantity: 1, option: { kind: "ringSize", value: "7" } },
+      ],
+      "es",
+    );
+
+    const [lines, session] = createCheckoutSessionMock.mock.calls[0];
+    expect(lines).toEqual([
+      { name: `${RING_PRODUCT.title} — Talla 6`, amount: 185000, quantity: 2 },
+      { name: `${RING_PRODUCT.title} — Talla 7`, amount: 185000, quantity: 1 },
+    ]);
+    expect(session.handles).toEqual([LINE.handle]);
+    expect(session.items).toEqual([
+      { handle: LINE.handle, quantity: 2, option: { kind: "ringSize", value: "6" } },
+      { handle: LINE.handle, quantity: 1, option: { kind: "ringSize", value: "7" } },
+    ]);
+    expect(session.options).toEqual([
+      { handle: LINE.handle, option: { kind: "ringSize", value: "6" } },
+      { handle: LINE.handle, option: { kind: "ringSize", value: "7" } },
+    ]);
+  });
+
+  it("merges lines that name the same option, whatever extra fields they carry", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(5, RING_PRODUCT));
+
+    await checkoutAction(
+      [
+        { ...LINE, quantity: 1, option: { kind: "ringSize", value: "7" } },
+        {
+          ...LINE,
+          quantity: 2,
+          option: { kind: "ringSize", value: "7", extra: -5 } as CartLineItem["option"],
+        },
+      ],
+      "es",
+    );
+
+    const [lines, session] = createCheckoutSessionMock.mock.calls[0];
+    expect(lines).toEqual([
+      { name: `${RING_PRODUCT.title} — Talla 7`, amount: 185000, quantity: 3 },
+    ]);
+    expect(session.items).toEqual([
+      { handle: LINE.handle, quantity: 3, option: { kind: "ringSize", value: "7" } },
+    ]);
+  });
+
+  it("charges the catalog's extra on EVERY unit of an option line", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(4, PENDANT_PRODUCT));
+
+    await checkoutAction([{ ...PENDANT_LINE, quantity: 2 }], "es");
+
+    expect(createCheckoutSessionMock.mock.calls[0][0]).toEqual([
+      {
+        name: "Dije de oro con amatista — Cadena 50 cm",
+        amount: 420000 + 15000,
+        quantity: 2,
+      },
+    ]);
+  });
+
+  it("reports every piece that is short, and only those", async () => {
+    const byHandle: Record<string, Product> = {
+      "anillo-a": { ...SERVER_PRODUCT, handle: "anillo-a", stock: 1 },
+      "anillo-b": { ...SERVER_PRODUCT, handle: "anillo-b", stock: 4 },
+      "anillo-c": { ...SERVER_PRODUCT, handle: "anillo-c", stock: 2 },
+    };
+    getProductByHandleMock.mockImplementation(
+      async (handle: string) => byHandle[handle],
+    );
+
+    const result = await checkoutAction(
+      [
+        { ...LINE, handle: "anillo-a", quantity: 2 },
+        { ...LINE, handle: "anillo-b", quantity: 4 },
+        { ...LINE, handle: "anillo-c", quantity: 3 },
+      ],
+      "es",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "insufficient-stock",
+      items: [
+        { handle: "anillo-a", available: 1 },
+        { handle: "anillo-c", available: 2 },
+      ],
+    });
+  });
+
+  it("reports a piece with no stock as sold, not as insufficient", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(0));
+
+    const result = await checkoutAction([{ ...LINE, quantity: 2 }], "es");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "sold",
+      soldHandles: [LINE.handle],
+    });
+  });
+
+  it("does not trust a product read that carries no usable stock", async () => {
+    getProductByHandleMock.mockResolvedValue({
+      ...SERVER_PRODUCT,
+      stock: undefined,
+    } as unknown as Product);
+
+    const result = await checkoutAction([LINE], "es");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "sold",
+      soldHandles: [LINE.handle],
+    });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("reports sold before insufficient-stock, and insufficient-stock before invalid-option", async () => {
+    const byHandle: Record<string, Product> = {
+      vendida: { ...SERVER_PRODUCT, handle: "vendida", availability: "sold", stock: 0 },
+      corta: { ...SERVER_PRODUCT, handle: "corta", stock: 1 },
+      anillo: { ...RING_PRODUCT, handle: "anillo", stock: 3 },
+    };
+    getProductByHandleMock.mockImplementation(
+      async (handle: string) => byHandle[handle],
+    );
+    const lines: CartLineItem[] = [
+      { ...LINE, handle: "anillo" }, // needs a size it does not have
+      { ...LINE, handle: "corta", quantity: 2 },
+      { ...LINE, handle: "vendida" },
+    ];
+
+    expect(await checkoutAction(lines, "es")).toEqual({
+      ok: false,
+      reason: "sold",
+      soldHandles: ["vendida"],
+    });
+    expect(await checkoutAction(lines.slice(0, 2), "es")).toEqual({
+      ok: false,
+      reason: "insufficient-stock",
+      items: [{ handle: "corta", available: 1 }],
+    });
+    expect(await checkoutAction(lines.slice(0, 1), "es")).toEqual({
+      ok: false,
+      reason: "invalid-option",
+      handles: ["anillo"],
+    });
+  });
+
+  it.each<[string, unknown]>([
+    ["zero", 0],
+    ["negative", -1],
+    ["fractional", 1.5],
+    ["NaN", Number.NaN],
+    ["a string", "2"],
+    ["missing", undefined],
+    ["null", null],
+    ["unsafe", Number.MAX_SAFE_INTEGER + 2],
+  ])(
+    "refuses a tampered quantity (%s) as a failed checkout, before reading anything",
+    async (_label, quantity) => {
+      const tampered = { ...LINE, quantity } as unknown as CartLineItem;
+
+      await expect(checkoutAction([tampered], "es")).resolves.toEqual({
+        ok: false,
+        reason: "checkout-failed",
+      });
+      expect(getAvailabilityMock).not.toHaveBeenCalled();
+      expect(getProductByHandleMock).not.toHaveBeenCalled();
+      expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reads the stock uncached, like the availability", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(2));
+
+    await checkoutAction([{ ...LINE, quantity: 2 }], "es");
+
+    expect(getProductByHandleMock).toHaveBeenCalledWith(LINE.handle, "es", {
+      fresh: true,
+    });
+  });
+
+  it("fails closed, creating no session, when the items would not fit Stripe's metadata", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(2));
+    createCheckoutSessionMock.mockRejectedValue(
+      new Error("Purchased items exceed Stripe's metadata limit."),
+    );
+
+    await expect(checkoutAction([LINE], "es")).resolves.toEqual({
+      ok: false,
+      reason: "checkout-failed",
+    });
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("does not read the shipping fee when the stock is short", async () => {
+    getProductByHandleMock.mockResolvedValue(stocked(1));
+
+    await checkoutAction([{ ...LINE, quantity: 2 }], "es");
+
+    expect(getShippingFeeMock).not.toHaveBeenCalled();
+  });
+});
+
+// A Server Action is a public endpoint, so the size of the cart is the caller's
+// to choose. It is bounded BEFORE any catalog read: 50 lines, 99 units a line.
+describe("checkoutAction — cart size limits", () => {
+  const linesOf = (count: number): CartLineItem[] =>
+    Array.from({ length: count }, (_, index) => ({
+      ...LINE,
+      handle: `pieza-${index}`,
+    }));
+
+  beforeEach(() => {
+    getAvailabilityMock.mockImplementation(async (handles: string[]) =>
+      Object.fromEntries(handles.map((handle) => [handle, "available"])),
+    );
+    getProductByHandleMock.mockImplementation(async (handle: string) => ({
+      ...SERVER_PRODUCT,
+      handle,
+      stock: 99,
+    }));
+    createCheckoutSessionMock.mockResolvedValue(
+      "https://checkout.stripe.com/c/test_session",
+    );
+  });
+
+  function expectNothingRead() {
+    expect(getAvailabilityMock).not.toHaveBeenCalled();
+    expect(getProductByHandleMock).not.toHaveBeenCalled();
+    expect(getShippingFeeMock).not.toHaveBeenCalled();
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  }
+
+  it("takes a cart of exactly 50 lines", async () => {
+    await checkoutAction(linesOf(50), "es");
+
+    expect(getProductByHandleMock).toHaveBeenCalledTimes(50);
+    expect(createCheckoutSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses 51 lines with a typed result, before any catalog read", async () => {
+    const result = await checkoutAction(linesOf(51), "es");
+
+    expect(result).toEqual({ ok: false, reason: "cart-too-large" });
+    expectNothingRead();
+  });
+
+  it("counts LINES, not distinct pieces: 51 lines of one piece are too many", async () => {
+    const result = await checkoutAction(
+      Array.from({ length: 51 }, () => LINE),
+      "es",
+    );
+
+    expect(result).toEqual({ ok: false, reason: "cart-too-large" });
+    expectNothingRead();
+  });
+
+  it("refuses an absurd number of lines without even looking at them", async () => {
+    const lines = linesOf(5_000);
+    const touched = vi.fn();
+    // A getter would fire if the action iterated a line's fields.
+    for (const line of lines) {
+      Object.defineProperty(line, "handle", { get: () => touched() ?? "x" });
+    }
+
+    const result = await checkoutAction(lines, "es");
+
+    expect(result).toEqual({ ok: false, reason: "cart-too-large" });
+    expect(touched).not.toHaveBeenCalled();
+    expectNothingRead();
+  });
+
+  it("takes a line of exactly 99 units (when the shop has them)", async () => {
+    await checkoutAction([{ ...LINE, quantity: 99 }], "es");
+
+    expect(createCheckoutSessionMock).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionMock.mock.calls[0][0][0].quantity).toBe(99);
+  });
+
+  it("refuses a line of 100 units with a typed result, before any catalog read", async () => {
+    const result = await checkoutAction([{ ...LINE, quantity: 100 }], "es");
+
+    expect(result).toEqual({ ok: false, reason: "cart-too-large" });
+    expectNothingRead();
+  });
+
+  it("refuses the whole cart when ONE of its lines is over the limit", async () => {
+    const result = await checkoutAction(
+      [LINE, { ...LINE, handle: "otra", quantity: 100 }],
+      "es",
+    );
+
+    expect(result).toEqual({ ok: false, reason: "cart-too-large" });
+    expectNothingRead();
+  });
+
+  it("is not the same as insufficient stock: 100 units is too large even when the shop has 1000", async () => {
+    getProductByHandleMock.mockResolvedValue({ ...SERVER_PRODUCT, stock: 1000 });
+
+    const result = await checkoutAction([{ ...LINE, quantity: 100 }], "es");
+
+    expect(result).toMatchObject({ reason: "cart-too-large" });
+    expect(getProductByHandleMock).not.toHaveBeenCalled();
+  });
+
+  it("answers a failed checkout, reading nothing, when the lines are not even a list", async () => {
+    const result = await checkoutAction(
+      { length: 1, 0: LINE } as unknown as CartLineItem[],
+      "es",
+    );
+
+    expect(result).toEqual({ ok: false, reason: "checkout-failed" });
+    expectNothingRead();
+  });
+
+  it("still validates a quantity that is not a whole number as a failed checkout, not as too large", async () => {
+    const result = await checkoutAction([{ ...LINE, quantity: 1.5 }], "es");
+
+    expect(result).toEqual({ ok: false, reason: "checkout-failed" });
   });
 });
 

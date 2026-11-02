@@ -4,6 +4,14 @@ import {
   INHERIT_PURCHASE_OPTION,
 } from "../../lib/commerce/options";
 
+// The slug is the piece's handle everywhere: the URL, the cart, the Stripe
+// metadata (comma- and semicolon-separated lists) and the stock markers. A
+// hand-typed slug with a comma, a space or an accent would break those lists,
+// so only lowercase letters, digits and hyphens are accepted.
+export const SLUG_PATTERN = /^[a-z0-9-]+$/;
+export const SLUG_ERROR =
+  "El slug solo puede llevar letras minúsculas sin acentos, números y guiones (sin espacios, comas ni otros símbolos).";
+
 // One document per physical piece (one-of-one model, see design.md ADR-2 /
 // Commerce Data Layer). Title/description are field-level bilingual objects
 // rather than separate per-language documents, so availability, price, and
@@ -58,7 +66,13 @@ export const product = defineType({
         "Se genera a partir del título en español. No lo edites a mano salvo que sepas lo que haces.",
       type: "slug",
       options: { source: "title.es", maxLength: 96 },
-      validation: (rule) => rule.required(),
+      validation: (rule) =>
+        rule.required().custom((value) => {
+          const current = (value as { current?: unknown } | undefined)?.current;
+          // A missing slug is `required()`'s to report, not this rule's.
+          if (typeof current !== "string" || current === "") return true;
+          return SLUG_PATTERN.test(current) || SLUG_ERROR;
+        }),
     }),
     defineField({
       name: "category",
@@ -165,11 +179,29 @@ export const product = defineType({
       of: [{ type: "chainLengthOption" }],
       hidden: ({ document }) => document?.purchaseOption !== "chainLength",
     }),
+    // How many units of this design can be sold. 1 (the default) is the
+    // one-of-one model; a design made in several copies raises it. It drops on
+    // its own with every sale (the Stripe webhook and the manual sale decrement
+    // it) and is what the storefront reads. A document that predates the field
+    // has no value: the storefront then falls back to `status` (see
+    // lib/commerce/transforms.ts `toStock`).
+    defineField({
+      name: "stock",
+      title: "Piezas disponibles",
+      description:
+        "1 = pieza única. Súbelo si haces más de una; llega a 0 sola al venderse.",
+      type: "number",
+      initialValue: 1,
+      validation: (rule) => rule.required().integer().min(0),
+    }),
+    // Legacy flag, kept in sync by the sale paths (stock 0 -> "sold"). Read-only
+    // in Studio: the number of pieces above is what the artisan edits, and the
+    // storefront reads `stock` first.
     defineField({
       name: "status",
-      title: "Disponibilidad",
+      title: "Estado (automático)",
       description:
-        'Marca "Vendida" en cuanto se venda la pieza — no hay reposición.',
+        "Se mantiene solo: pasa a «Vendida» cuando se acaban las piezas. No lo edites; cambia las piezas disponibles.",
       type: "string",
       options: {
         list: [
@@ -179,15 +211,29 @@ export const product = defineType({
         layout: "radio",
       },
       initialValue: "available",
-      validation: (rule) => rule.required(),
+      readOnly: true,
     }),
   ],
   preview: {
-    select: { title: "title.es", media: "media.0", status: "status" },
-    prepare({ title, media, status }) {
+    select: {
+      title: "title.es",
+      media: "media.0",
+      status: "status",
+      stock: "stock",
+    },
+    prepare({ title, media, status, stock }) {
+      // `stock` first, `status` for a document that predates it: the same rule
+      // the storefront applies.
+      const pieces =
+        typeof stock === "number" ? stock : status === "available" ? 1 : 0;
       return {
         title,
-        subtitle: status === "sold" ? "Vendida" : "Disponible",
+        subtitle:
+          pieces <= 0
+            ? "Agotada"
+            : pieces === 1
+              ? "1 pieza disponible"
+              : `${pieces} piezas disponibles`,
         media,
       };
     },

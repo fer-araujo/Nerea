@@ -44,6 +44,12 @@ export interface NewSale {
   note?: string;
   /** Opaque uid of the admin; a Stripe sale has none. */
   actor?: string;
+  /**
+   * More units were sold than the shop had ("Revisar: sobreventa"). Normally set
+   * AFTER the sale exists (the stock is taken off after it is recorded), see
+   * sales.ts `markSaleOversold`; here for completeness of the shape.
+   */
+  oversold?: boolean;
 }
 
 export function buildSaleDocument(sale: NewSale): Record<string, unknown> {
@@ -55,6 +61,7 @@ export function buildSaleDocument(sale: NewSale): Record<string, unknown> {
       handle: item.handle,
       title: item.title,
       price: item.price,
+      quantity: item.quantity,
       ...(item.option ? { option: item.option } : {}),
     })),
     subtotal: sale.subtotal,
@@ -73,6 +80,7 @@ export function buildSaleDocument(sale: NewSale): Record<string, unknown> {
     // A manual sale with no terminal commission (cash) stores no field at all.
     ...(sale.terminalFee ? { terminalFee: sale.terminalFee } : {}),
     ...(sale.note ? { note: sale.note } : {}),
+    ...(sale.oversold ? { oversold: true } : {}),
     createdAt: FieldValue.serverTimestamp(),
     ...(sale.actor ? { actor: sale.actor } : {}),
   };

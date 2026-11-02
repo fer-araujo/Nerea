@@ -34,6 +34,24 @@ export interface Category {
   slug: string;
 }
 
+/**
+ * A themed or seasonal grouping of pieces that cuts ACROSS categories (a "Día
+ * de Muertos" collection can hold rings, earrings and pendants). Only ever a
+ * VISIBLE one reaches the storefront — switched on and not past its closing
+ * date; hiding is the data layer's job, not the UI's. See
+ * sanity/schemaTypes/collection.ts.
+ */
+export interface Collection {
+  title: string;
+  slug: string;
+  description: string;
+  /** Optional hero image; `alt` is set whenever the artisan wrote one. */
+  cover: MediaItem | null;
+}
+
+/** A collection as a piece reports it: just enough to label and link it. */
+export type CollectionRef = Pick<Collection, "title" | "slug">;
+
 export interface ProductSummary {
   handle: string;
   title: string;
@@ -56,6 +74,13 @@ export interface ProductSummary {
    * itself never reads this field.
    */
   categorySlug?: string;
+  /**
+   * Slugs of the VISIBLE collections the piece belongs to (many-to-many, so a
+   * list). Same reason as `categorySlug`: lets the shop's in-memory filter and
+   * the collection page match cards without a second query. Slugs only — the
+   * titles are not needed per card, so they are not serialized to the client.
+   */
+  collectionSlugs?: string[];
 }
 
 /**
@@ -97,6 +122,8 @@ export interface Product extends ProductSummary {
   media: MediaItem[];
   /** Full localized category, for display (e.g. the product-detail spec-plate). */
   category?: Category;
+  /** The visible collections the piece belongs to, for display and linking. */
+  collections?: CollectionRef[];
   /** What the shopper must choose before buying — see `ProductOptions`. */
   options: ProductOptions;
 }
@@ -125,4 +152,8 @@ export interface CommerceReadApi {
   ): Promise<Record<string, Availability>>;
   /** All product categories, localized, for the shop's filter chips. */
   getCategories(locale: Locale): Promise<Category[]>;
+  /** Visible collections only (switched on, not past `endsAt`), in author order. */
+  getCollections(locale: Locale): Promise<Collection[]>;
+  /** `null` for an unknown slug AND for a hidden collection — callers 404 on both. */
+  getCollectionBySlug(slug: string, locale: Locale): Promise<Collection | null>;
 }

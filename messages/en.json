@@ -23,6 +23,7 @@
   "Nav": {
     "home": "Home",
     "shop": "Shop",
+    "collections": "Collections",
     "about": "About",
     "contact": "Contact"
   },
@@ -49,7 +50,23 @@
     "emptyTitle": "No pieces on display yet",
     "emptyBody": "The atelier is preparing the next collection — check back soon.",
     "allCategories": "All",
-    "emptyCategoryBody": "No pieces in this category yet."
+    "allCollections": "All",
+    "categoriesLabel": "Category",
+    "collectionsLabel": "Collection",
+    "emptyFilterBody": "No pieces match these filters."
+  },
+  "Collections": {
+    "title": "Collections",
+    "intro": "Pieces gathered around a theme, a season or a special date. One piece can belong to several collections.",
+    "emptyTitle": "No collections yet",
+    "emptyBody": "When the atelier presents a new collection, you will find it here.",
+    "back": "Back to the collections",
+    "emptyPiecesTitle": "This collection has no pieces yet",
+    "emptyPiecesBody": "The atelier is preparing it — check back soon.",
+    "viewShop": "See the whole shop",
+    "notFoundTitle": "This collection isn't available",
+    "notFoundBody": "The link may be broken, or the collection has ended or was removed.",
+    "notFoundCta": "See the collections"
   },
   "ProductDetail": {
     "acquireCta": "Acquire this piece",
@@ -57,6 +74,7 @@
     "notFoundBody": "The link may be broken, or the piece was removed from the catalog.",
     "notFoundCta": "Back to the shop",
     "back": "Back to the shop",
+    "collectionsLabel": "Collections",
     "ringSizeLegend": "Ring size",
     "chainLengthLegend": "Chain length",
     "chainLengthChip": "{cm} cm",
@@ -141,6 +159,10 @@
     "shop": {
       "title": "Shop",
       "description": "Browse the atelier's available pieces: silver and gold, lost-wax cast, never remade. Each one unique, while it lasts."
+    },
+    "collections": {
+      "title": "Collections",
+      "description": "The atelier's collections: silver and gold pieces gathered by theme or season, each one unique and never remade."
     },
     "about": {
       "title": "The atelier",

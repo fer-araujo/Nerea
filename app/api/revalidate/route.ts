@@ -1,7 +1,11 @@
 import type { NextRequest } from "next/server";
 import { parseBody, type ParsedBody } from "next-sanity/webhook";
 import { expireTag } from "@/lib/commerce/revalidate";
-import { CATEGORIES_TAG, PRODUCTS_TAG } from "@/lib/commerce/sanity/client";
+import {
+  CATEGORIES_TAG,
+  COLLECTIONS_TAG,
+  PRODUCTS_TAG,
+} from "@/lib/commerce/sanity/client";
 import { SITE_SETTINGS_TAG } from "@/lib/site-settings/adapter";
 
 export const runtime = "nodejs";
@@ -12,6 +16,9 @@ export const runtime = "nodejs";
 //
 // - category: its title and slug are projected into every product, and the
 //   shop's filter chips read the list itself.
+// - collection: the list and the page read it directly, and the pieces carry
+//   the slugs/titles of the visible collections they belong to (switching one
+//   off or editing its closing date changes what every piece reports).
 // - siteSettings: the logo, hero, WhatsApp number and shipping fee, but also
 //   the default ring sizes / chain lengths that PRODUCT_BY_HANDLE_QUERY
 //   projects into each product (`optionDefaults`).
@@ -21,6 +28,8 @@ function tagsFor(type: unknown): string[] {
       return [PRODUCTS_TAG];
     case "category":
       return [CATEGORIES_TAG, PRODUCTS_TAG];
+    case "collection":
+      return [COLLECTIONS_TAG, PRODUCTS_TAG];
     case "siteSettings":
       return [SITE_SETTINGS_TAG, PRODUCTS_TAG];
     default:
@@ -33,8 +42,8 @@ function unauthorized(): Response {
 }
 
 // Sanity webhook endpoint (sanity.io/manage > API > Webhooks, see the README):
-// expires the cached catalog the moment a piece, a category or the site
-// settings change in Studio, instead of waiting out the 60s ISR window.
+// expires the cached catalog the moment a piece, a category, a collection or
+// the site settings change in Studio, instead of waiting out the 60s ISR window.
 //
 // Signature verification is the ONLY thing standing between this route and
 // anyone who can POST to it, so it fails closed:

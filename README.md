@@ -299,6 +299,15 @@ pinned as `deployment.appId` in `sanity.cli.ts`.
 - In Studio, per piece: **Opción de compra** (ninguna, talla de anillo or largo
   de cadena). In **Ajustes del sitio**: **Costo de envío** (in centavos:
   `15000` is $150.00 MXN, `0` is free shipping).
+- In Studio, **Colecciones**: a themed or seasonal grouping that cuts across
+  categories (a "Día de Muertos" collection can hold rings, earrings and
+  pendants). Add the collections to each piece in its **Colecciones** field; a
+  piece has one category and any number of collections. A collection shows on
+  the storefront (shop filter, `/colecciones`, its own page, footer link and
+  sitemap) only while **Activa** is on and its **Fecha de cierre** is empty or
+  still ahead; once that date passes it disappears by itself (within the 60
+  second cache window), and its page answers 404. Run `npx sanity deploy` once
+  after this release so Studio gets the new document type.
 - Legal pages: fill in the bracketed placeholders and approve the wording (see
   "Legal pages (draft)" above). They live in the `messages` files, not in Studio.
 
@@ -333,7 +342,7 @@ by itself.
    - **URL:** `https://<your-site>/api/revalidate`
    - **Dataset:** `production`
    - **Trigger on:** Create, Update and Delete
-   - **Filter:** `_type in ["product","category","siteSettings"]`
+   - **Filter:** `_type in ["product","category","collection","siteSettings"]`
    - **Projection:** `{_type}`
    - **HTTP method:** `POST`
    - **Secret:** the same value as `SANITY_REVALIDATE_SECRET`
@@ -342,9 +351,10 @@ by itself.
    `401` means the secret is unset on the site or differs from the webhook's.
 
 A product refreshes the catalog; a category refreshes the categories and the
-catalog; the site settings refresh the settings and the catalog (the default
-ring sizes and chain lengths live there). Local development cannot receive the
-webhook, so it relies on the 60 second cache.
+catalog; a collection refreshes the collections and the catalog (pieces report
+the collections they belong to); the site settings refresh the settings and the
+catalog (the default ring sizes and chain lengths live there). Local
+development cannot receive the webhook, so it relies on the 60 second cache.
 
 ## Dependency notes
 

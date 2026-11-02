@@ -1,8 +1,11 @@
+import { isCollectionVisible } from "./collections";
 import { resolveProductOptions } from "./options";
 import { resolveLocalized, toAvailability, type Localized } from "./transforms";
 import type {
   Availability,
   Category,
+  Collection,
+  CollectionRef,
   CommerceReadApi,
   Locale,
   MediaItem,
@@ -16,12 +19,22 @@ interface FixtureCategory {
   slug: string;
 }
 
+interface FixtureCollection {
+  title: Localized;
+  slug: string;
+  description: Localized;
+  /** Mirrors the Studio fields, so the visibility rule runs on the same inputs. */
+  active: boolean;
+  endsAt?: string;
+}
+
 interface FixtureProduct {
   handle: string;
   title: Localized;
   description: Localized;
   media: MediaItem[];
   category?: FixtureCategory;
+  collections?: FixtureCollection[];
   price: Money;
   /**
    * Loosely typed (not `Availability`) on purpose: it mirrors an arbitrary
@@ -53,6 +66,22 @@ const CATEGORY_EARRINGS: FixtureCategory = {
   slug: "aretes",
 };
 
+// One sample collection that cuts across categories (a ring and a pair of
+// earrings) — the pendant is deliberately left out, so the shop's collection
+// filter has something to include AND something to exclude. No `endsAt`: a
+// fixed date would silently turn this demo off one day.
+const COLLECTION_DAY_OF_THE_DEAD: FixtureCollection = {
+  title: { es: "Día de Muertos", en: "Day of the Dead" },
+  slug: "dia-de-muertos",
+  description: {
+    es: "Piezas inspiradas en la luz de las velas, la cempasúchil y la memoria. Una colección de temporada, en plata .925.",
+    en: "Pieces inspired by candlelight, marigolds and remembrance. A seasonal collection in .925 silver.",
+  },
+  active: true,
+};
+
+const FIXTURE_COLLECTIONS: FixtureCollection[] = [COLLECTION_DAY_OF_THE_DEAD];
+
 // Local, credential-free stand-ins for the Sanity-backed catalog so the
 // storefront is demoable (COMMERCE_SOURCE=fixtures) before/without the
 // artisan's live Sanity project. The shape mirrors the Sanity schema
@@ -79,6 +108,7 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
     },
     media: [],
     category: CATEGORY_RINGS,
+    collections: [COLLECTION_DAY_OF_THE_DEAD],
     price: { amount: 185000, currency: "MXN" }, // $1,850.00 MXN
     status: "available",
     purchaseOption: "ringSize",
@@ -116,6 +146,7 @@ const FIXTURE_PRODUCTS: FixtureProduct[] = [
     },
     media: [],
     category: CATEGORY_EARRINGS,
+    collections: [COLLECTION_DAY_OF_THE_DEAD],
     price: { amount: 95000, currency: "MXN" }, // $950.00 MXN
     status: "available",
     purchaseOption: "none",
@@ -126,6 +157,21 @@ function findFixture(handle: string): FixtureProduct | undefined {
   return FIXTURE_PRODUCTS.find((product) => product.handle === handle);
 }
 
+function visibleCollections(product: FixtureProduct): FixtureCollection[] {
+  return (product.collections ?? []).filter((collection) =>
+    isCollectionVisible(collection),
+  );
+}
+
+function toCollection(collection: FixtureCollection, locale: Locale): Collection {
+  return {
+    title: resolveLocalized(collection.title, locale),
+    slug: collection.slug,
+    description: resolveLocalized(collection.description, locale),
+    cover: null,
+  };
+}
+
 function toSummary(product: FixtureProduct, locale: Locale): ProductSummary {
   return {
     handle: product.handle,
@@ -134,6 +180,7 @@ function toSummary(product: FixtureProduct, locale: Locale): ProductSummary {
     availability: toAvailability(product.status),
     cover: product.media[0] ?? null,
     categorySlug: product.category?.slug,
+    collectionSlugs: visibleCollections(product).map((collection) => collection.slug),
   };
 }
 
@@ -148,6 +195,12 @@ function toProduct(product: FixtureProduct, locale: Locale): Product {
           slug: product.category.slug,
         }
       : undefined,
+    collections: visibleCollections(product).map(
+      (collection): CollectionRef => ({
+        title: resolveLocalized(collection.title, locale),
+        slug: collection.slug,
+      }),
+    ),
     options: resolveProductOptions({ purchaseOption: product.purchaseOption }),
   };
 }
@@ -194,5 +247,18 @@ export const fixturesApi: CommerceReadApi = {
         slug: category.slug,
       }),
     );
+  },
+
+  async getCollections(locale) {
+    return FIXTURE_COLLECTIONS.filter((collection) =>
+      isCollectionVisible(collection),
+    ).map((collection) => toCollection(collection, locale));
+  },
+
+  async getCollectionBySlug(slug, locale) {
+    const collection = FIXTURE_COLLECTIONS.find(
+      (candidate) => candidate.slug === slug && isCollectionVisible(candidate),
+    );
+    return collection ? toCollection(collection, locale) : null;
   },
 };

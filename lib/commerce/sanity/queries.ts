@@ -39,6 +39,34 @@ const CHAIN_LENGTH_PROJECTION = `{
     "extraPrice": coalesce(extraPrice, 0)
   }`;
 
+// Collection visibility (see sanity/schemaTypes/collection.ts): switched on AND
+// no closing date or a closing date still ahead. Evaluated by Content Lake with
+// GROQ's own `now()`, NOT with a `$now` param: a timestamp param would change
+// the request URL on every call, so every read would miss Next's fetch cache and
+// the 60s ISR window would stop meaning anything. `now()` keeps the URL stable;
+// the cached result is at most one revalidation window old. Nothing here is
+// built from user input — the only dynamic parts of the queries are `$params`.
+// `dateTime()` makes the comparison a real date comparison instead of a string
+// one, and yields null for a malformed value, which `> now()` then rejects.
+const COLLECTION_VISIBLE = `active == true && (!defined(endsAt) || dateTime(endsAt) > dateTime(now()))`;
+
+// The same rule applied to a piece's `collections` references: each `@` is a
+// reference, so it is dereferenced before the check. A hidden collection is
+// dropped from the piece rather than left dangling in its data.
+const VISIBLE_COLLECTION_REFS = `collections[@->active == true && (!defined(@->endsAt) || dateTime(@->endsAt) > dateTime(now()))]`;
+
+// The cover is an `image` with an `alt` {es,en} object. `cover{...}` is null
+// when no cover was uploaded, which the adapter maps to "no cover".
+const COLLECTION_PROJECTION = `{
+  "title": coalesce(title[$locale], title.es, ""),
+  "slug": slug.current,
+  "description": coalesce(description[$locale], description.es, ""),
+  "cover": cover{
+    "url": asset->url,
+    "alt": coalesce(alt[$locale], alt.es, "")
+  }
+}`;
+
 export const PRODUCTS_LIST_QUERY = `
 *[_type == "product"] | order(_createdAt desc) {
   "handle": slug.current,
@@ -46,7 +74,8 @@ export const PRODUCTS_LIST_QUERY = `
   "price": { "amount": coalesce(price.amount, 0), "currency": coalesce(price.currency, "MXN") },
   status,
   "cover": media[0]${MEDIA_ITEM_PROJECTION},
-  "categorySlug": category->slug.current
+  "categorySlug": category->slug.current,
+  "collectionSlugs": coalesce(${VISIBLE_COLLECTION_REFS}->slug.current, [])
 }
 `;
 
@@ -62,6 +91,10 @@ export const PRODUCT_BY_HANDLE_QUERY = `
     "title": coalesce(title[$locale], title.es, ""),
     "slug": slug.current
   },
+  "collections": coalesce(${VISIBLE_COLLECTION_REFS}->{
+    "title": coalesce(title[$locale], title.es, ""),
+    "slug": slug.current
+  }, []),
   "purchaseOption": purchaseOption,
   "categoryPurchaseOption": category->purchaseOption,
   "ringSizes": coalesce(ringSizes, []),
@@ -85,4 +118,14 @@ export const CATEGORIES_QUERY = `
   "title": coalesce(title[$locale], title.es, ""),
   "slug": slug.current
 }
+`;
+
+export const COLLECTIONS_QUERY = `
+*[_type == "collection" && ${COLLECTION_VISIBLE}] | order(coalesce(order, 999999) asc, title.es asc) ${COLLECTION_PROJECTION}
+`;
+
+// A hidden collection (switched off or past `endsAt`) is simply not found, so
+// its page 404s exactly like an unknown slug — no separate "closed" state.
+export const COLLECTION_BY_SLUG_QUERY = `
+*[_type == "collection" && slug.current == $slug && ${COLLECTION_VISIBLE}][0] ${COLLECTION_PROJECTION}
 `;

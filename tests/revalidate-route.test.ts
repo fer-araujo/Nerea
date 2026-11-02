@@ -16,7 +16,11 @@ vi.mock("next/cache", () => ({
 }));
 
 import * as route from "@/app/api/revalidate/route";
-import { CATEGORIES_TAG, PRODUCTS_TAG } from "@/lib/commerce/sanity/client";
+import {
+  CATEGORIES_TAG,
+  COLLECTIONS_TAG,
+  PRODUCTS_TAG,
+} from "@/lib/commerce/sanity/client";
 import { SITE_SETTINGS_TAG } from "@/lib/site-settings/adapter";
 
 const { POST } = route;
@@ -127,6 +131,9 @@ describe("POST /api/revalidate — a verified delivery", () => {
   it.each([
     ["product", ["products"]],
     ["category", ["categories", "products"]],
+    // The pieces report the visible collections they belong to, hence the
+    // catalog tag too.
+    ["collection", ["collections", "products"]],
     // The settings also carry the default ring sizes / chain lengths that the
     // product query projects, hence the catalog tag too.
     ["siteSettings", ["site-settings", "products"]],
@@ -147,6 +154,14 @@ describe("POST /api/revalidate — a verified delivery", () => {
     await POST(makeRequest());
     expect(revalidateTagMock.mock.calls.map(([tag]) => tag)).toEqual([
       CATEGORIES_TAG,
+      PRODUCTS_TAG,
+    ]);
+
+    revalidateTagMock.mockClear();
+    validDelivery({ _type: "collection" });
+    await POST(makeRequest());
+    expect(revalidateTagMock.mock.calls.map(([tag]) => tag)).toEqual([
+      COLLECTIONS_TAG,
       PRODUCTS_TAG,
     ]);
 

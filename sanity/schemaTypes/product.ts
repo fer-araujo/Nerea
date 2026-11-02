@@ -67,6 +67,19 @@ export const product = defineType({
       type: "reference",
       to: [{ type: "category" }],
     }),
+    // Many-to-many, unlike `category`: a piece can sit in several collections at
+    // once (e.g. "Día de Muertos" and "Plata .925"). Only collections that are
+    // active and not past their closing date are shown on the storefront, so a
+    // reference to a closed one is harmless and does not need cleaning up.
+    defineField({
+      name: "collections",
+      title: "Colecciones",
+      description:
+        "Colecciones a las que pertenece la pieza (opcional). Puede estar en varias.",
+      type: "array",
+      of: [{ type: "reference", to: [{ type: "collection" }] }],
+      validation: (rule) => rule.unique(),
+    }),
     defineField({
       name: "media",
       title: "Galería",

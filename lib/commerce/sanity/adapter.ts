@@ -7,6 +7,8 @@ import { toAvailability, toMoney } from "../transforms";
 import type {
   Availability,
   Category,
+  Collection,
+  CollectionRef,
   CommerceReadApi,
   CommerceReadOptions,
   MediaItem,
@@ -16,6 +18,8 @@ import type {
 import {
   CATEGORIES_REVALIDATE_SECONDS,
   CATEGORIES_TAG,
+  COLLECTIONS_REVALIDATE_SECONDS,
+  COLLECTIONS_TAG,
   PRODUCTS_REVALIDATE_SECONDS,
   PRODUCTS_TAG,
   sanityClient,
@@ -23,6 +27,8 @@ import {
 import {
   AVAILABILITY_BY_HANDLES_QUERY,
   CATEGORIES_QUERY,
+  COLLECTION_BY_SLUG_QUERY,
+  COLLECTIONS_QUERY,
   PRODUCT_BY_HANDLE_QUERY,
   PRODUCTS_LIST_QUERY,
 } from "./queries";
@@ -45,6 +51,16 @@ interface RawCategory {
   slug: string;
 }
 
+interface RawCollectionRef {
+  title: string;
+  slug: string;
+}
+
+interface RawCollection extends RawCollectionRef {
+  description: string | null;
+  cover: { url: string | null; alt: string | null } | null;
+}
+
 interface RawProductSummary {
   handle: string;
   title: string;
@@ -52,6 +68,7 @@ interface RawProductSummary {
   status: string;
   cover: RawMediaItem | null;
   categorySlug: string | null;
+  collectionSlugs: string[] | null;
 }
 
 // `purchaseOption` / `ringSizes` / `chainLengths` are the piece's own option
@@ -67,6 +84,7 @@ interface RawProduct extends RawOptionSource {
   status: string;
   media: (RawMediaItem | null)[];
   category: RawCategory | null;
+  collections: RawCollectionRef[] | null;
   optionDefaults: RawOptionDefaults | null;
 }
 
@@ -101,6 +119,18 @@ function categoriesFetchOptions() {
   };
 }
 
+// The collection reads share one cache tag. `getCollectionBySlug` is a plain
+// collections read too: its pieces come from `getProducts` (tagged PRODUCTS_TAG),
+// so a sale refreshes the grid without this read having to know about it.
+function collectionsFetchOptions() {
+  return {
+    next: {
+      revalidate: COLLECTIONS_REVALIDATE_SECONDS,
+      tags: [COLLECTIONS_TAG],
+    },
+  };
+}
+
 // A media item with no resolved asset URL (a dangling/broken reference) is
 // dropped rather than surfaced — the UI's "no media" fallback
 // (PlaceholderBlock) is a better outcome than an <img>/<video> pointed at
@@ -120,6 +150,29 @@ function toCategory(raw: RawCategory | null): Category | undefined {
   return raw ? { title: raw.title, slug: raw.slug } : undefined;
 }
 
+function toCollectionRef(raw: RawCollectionRef): CollectionRef {
+  return { title: raw.title, slug: raw.slug };
+}
+
+// A cover with no resolved asset URL (an alt typed before any upload, or a
+// dangling reference) is "no cover", same call as `toMediaItem`. The alt is
+// optional on the wire; an empty one is left off so MediaFrame falls back to
+// the collection's title.
+function toCollection(raw: RawCollection): Collection {
+  return {
+    title: raw.title,
+    slug: raw.slug,
+    description: raw.description ?? "",
+    cover: raw.cover?.url
+      ? {
+          kind: "image",
+          url: raw.cover.url,
+          alt: raw.cover.alt || undefined,
+        }
+      : null,
+  };
+}
+
 function toProductSummary(raw: RawProductSummary): ProductSummary {
   return {
     handle: raw.handle,
@@ -128,6 +181,7 @@ function toProductSummary(raw: RawProductSummary): ProductSummary {
     availability: toAvailability(raw.status),
     cover: toMediaItem(raw.cover),
     categorySlug: raw.categorySlug ?? undefined,
+    collectionSlugs: raw.collectionSlugs ?? [],
   };
 }
 
@@ -142,6 +196,7 @@ function toProduct(raw: RawProduct): Product {
     cover: media[0] ?? null,
     media,
     category: toCategory(raw.category),
+    collections: (raw.collections ?? []).map(toCollectionRef),
     options: resolveProductOptions(raw, raw.optionDefaults),
   };
 }
@@ -201,5 +256,23 @@ export const sanityApi: CommerceReadApi = {
       title: category.title,
       slug: category.slug,
     }));
+  },
+
+  async getCollections(locale) {
+    const collections = await sanityClient.fetch<RawCollection[]>(
+      COLLECTIONS_QUERY,
+      { locale },
+      collectionsFetchOptions(),
+    );
+    return collections.map(toCollection);
+  },
+
+  async getCollectionBySlug(slug, locale) {
+    const collection = await sanityClient.fetch<RawCollection | null>(
+      COLLECTION_BY_SLUG_QUERY,
+      { slug, locale },
+      collectionsFetchOptions(),
+    );
+    return collection ? toCollection(collection) : null;
   },
 };

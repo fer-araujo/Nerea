@@ -23,6 +23,7 @@
   "Nav": {
     "home": "Inicio",
     "shop": "Tienda",
+    "collections": "Colecciones",
     "about": "Nosotros",
     "contact": "Contacto"
   },
@@ -49,7 +50,23 @@
     "emptyTitle": "Todavía no hay piezas en exhibición",
     "emptyBody": "El taller está preparando la próxima colección — vuelve pronto.",
     "allCategories": "Todas",
-    "emptyCategoryBody": "Todavía no hay piezas en esta categoría."
+    "allCollections": "Todas",
+    "categoriesLabel": "Categoría",
+    "collectionsLabel": "Colección",
+    "emptyFilterBody": "No hay piezas que coincidan con estos filtros."
+  },
+  "Collections": {
+    "title": "Colecciones",
+    "intro": "Piezas reunidas por un tema, una temporada o una fecha especial. Una misma pieza puede formar parte de varias.",
+    "emptyTitle": "Todavía no hay colecciones",
+    "emptyBody": "Cuando el taller presente una nueva colección, la encontrarás aquí.",
+    "back": "Volver a las colecciones",
+    "emptyPiecesTitle": "Esta colección todavía no tiene piezas",
+    "emptyPiecesBody": "El taller la está preparando — vuelve pronto.",
+    "viewShop": "Ver toda la tienda",
+    "notFoundTitle": "Esta colección no está disponible",
+    "notFoundBody": "El enlace puede estar roto, o la colección ya terminó o fue retirada.",
+    "notFoundCta": "Ver las colecciones"
   },
   "ProductDetail": {
     "acquireCta": "Adquirir esta pieza",
@@ -57,6 +74,7 @@
     "notFoundBody": "El enlace puede estar roto o la pieza fue retirada del catálogo.",
     "notFoundCta": "Volver a la tienda",
     "back": "Volver a la tienda",
+    "collectionsLabel": "Colecciones",
     "ringSizeLegend": "Talla de anillo",
     "chainLengthLegend": "Largo de cadena",
     "chainLengthChip": "{cm} cm",
@@ -141,6 +159,10 @@
     "shop": {
       "title": "Tienda",
       "description": "Explora las piezas disponibles del taller: plata y oro fundidos a la cera perdida, sin reposición. Cada pieza es única mientras dure."
+    },
+    "collections": {
+      "title": "Colecciones",
+      "description": "Colecciones del taller: piezas de plata y oro reunidas por tema o temporada, únicas y sin reposición."
     },
     "about": {
       "title": "El taller",

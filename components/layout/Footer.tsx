@@ -11,7 +11,7 @@ const LEGAL_LINKS = [
 ] as const;
 
 // Minimal atelier footer: the wordmark, a one-line credit, the secondary nav
-// (shop, about, contact — the primary Shop CTA lives in the sticky Header;
+// (shop, collections, about, contact — the primary Shop CTA lives in the sticky Header;
 // About/Contact live here to keep the height-capped Header quiet on mobile),
 // and a quiet baseline with the legal links. No version stamps, no atmospheric
 // locale strip — just the mark and the maker's credit.
@@ -40,6 +40,12 @@ export async function Footer({ locale }: { locale: string }) {
               className="w-fit text-ink transition-colors hover:text-brass-deep"
             >
               {nav("shop")}
+            </Link>
+            <Link
+              href="/colecciones"
+              className="w-fit text-ink transition-colors hover:text-brass-deep"
+            >
+              {nav("collections")}
             </Link>
             <Link
               href="/about"

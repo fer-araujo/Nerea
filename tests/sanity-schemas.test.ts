@@ -14,6 +14,8 @@ import {
   resolveProductOptions,
 } from "@/lib/commerce/options";
 import { category } from "@/sanity/schemaTypes/category";
+import { collection } from "@/sanity/schemaTypes/collection";
+import { schemaTypes } from "@/sanity/schemaTypes";
 import { product } from "@/sanity/schemaTypes/product";
 import { siteSettings } from "@/sanity/schemaTypes/siteSettings";
 
@@ -23,6 +25,8 @@ interface FieldLike {
   description?: string;
   type: string;
   initialValue?: unknown;
+  of?: { type: string; to?: { type: string }[] }[];
+  fields?: FieldLike[];
   options?: { list?: { title: string; value: string }[]; layout?: string };
   validation?: (rule: unknown) => unknown;
 }
@@ -154,5 +158,119 @@ describe("product.purchaseOption", () => {
           }).kind,
       ),
     ).toEqual(["chainLength", "none", "ringSize", "chainLength"]);
+  });
+});
+
+describe("collection schema", () => {
+  it("is registered with the other document types, next to the categories", () => {
+    const names = schemaTypes.map((type) => type.name);
+
+    expect(names).toContain("collection");
+    expect(names.indexOf("collection")).toBe(names.indexOf("category") + 1);
+    expect(collection.type).toBe("document");
+    expect(collection.title).toBe("Colección");
+  });
+
+  it("carries a bilingual title (Spanish required), a slug and a bilingual description", () => {
+    const title = fieldOf(collection, "title");
+    expect(title.type).toBe("object");
+    expect(title.title).toBe("Nombre");
+    expect((title.fields ?? []).map((field) => field.name)).toEqual(["es", "en"]);
+
+    expect(fieldOf(collection, "slug").type).toBe("slug");
+
+    const description = fieldOf(collection, "description");
+    expect(description.type).toBe("object");
+    expect((description.fields ?? []).map((field) => field.name)).toEqual(["es", "en"]);
+  });
+
+  it("is on by default and can be switched off", () => {
+    const active = fieldOf(collection, "active");
+
+    expect(active.type).toBe("boolean");
+    expect(active.title).toBe("Activa");
+    expect(active.initialValue).toBe(true);
+  });
+
+  it("offers an optional closing date and a numeric order", () => {
+    const endsAt = fieldOf(collection, "endsAt");
+    expect(endsAt.type).toBe("datetime");
+    expect(endsAt.title).toBe("Fecha de cierre (opcional)");
+    // Optional: no required() rule at all.
+    expect(endsAt.validation).toBeUndefined();
+
+    const order = fieldOf(collection, "order");
+    expect(order.type).toBe("number");
+    expect(order.title).toBe("Orden");
+  });
+
+  describe("cover", () => {
+    const cover = fieldOf(collection, "cover");
+
+    // The rule, run through a stub: `custom` is the only method the schema may
+    // call, so anything else it reached for would throw.
+    function validate(value: unknown): unknown {
+      let captured: ((value: unknown) => unknown) | undefined;
+      const rule = {
+        custom(validator: (value: unknown) => unknown) {
+          captured = validator;
+          return rule;
+        },
+      };
+      cover.validation?.(rule);
+      if (!captured) {
+        throw new Error("The cover registered no custom validation");
+      }
+      return captured(value);
+    }
+
+    it("is an optional image with a bilingual alt text", () => {
+      expect(cover.type).toBe("image");
+      const alt = (cover.fields ?? []).find((field) => field.name === "alt");
+      expect(alt?.type).toBe("object");
+      expect((alt?.fields ?? []).map((field) => field.name)).toEqual(["es", "en"]);
+    });
+
+    it.each([undefined, null, {}])("passes when there is no image: %j", (value) => {
+      expect(validate(value)).toBe(true);
+    });
+
+    it("requires the Spanish alt text once an image is set", () => {
+      const result = validate({ asset: { _ref: "image-abc" } });
+
+      expect(typeof result).toBe("string");
+      expect(result).toContain("texto alternativo");
+      expect(validate({ asset: { _ref: "image-abc" }, alt: { es: "  " } })).toEqual(
+        result,
+      );
+    });
+
+    it("accepts an image whose alt text is written", () => {
+      expect(
+        validate({ asset: { _ref: "image-abc" }, alt: { es: "Velas y cempasúchil" } }),
+      ).toBe(true);
+    });
+  });
+});
+
+describe("product.collections", () => {
+  const field = fieldOf(product, "collections");
+
+  it("is an optional many-to-many list of references to collections", () => {
+    expect(field.type).toBe("array");
+    expect(field.title).toBe("Colecciones");
+    expect(field.of).toEqual([{ type: "reference", to: [{ type: "collection" }] }]);
+    // Optional: a piece in no collection is the normal case.
+    const rule = { unique: () => "unique-only" };
+    expect(field.validation?.(rule)).toBe("unique-only");
+  });
+
+  it("sits next to the single-valued category", () => {
+    const names = ((product as unknown as { fields: FieldLike[] }).fields).map(
+      (candidate) => candidate.name,
+    );
+
+    expect(names.indexOf("collections")).toBe(names.indexOf("category") + 1);
+    expect(fieldOf(product, "category").type).toBe("reference");
   });
 });

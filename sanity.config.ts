@@ -40,6 +40,7 @@ export default defineConfig({
             S.divider(),
             S.documentTypeListItem("product").title("Piezas"),
             S.documentTypeListItem("category").title("Categorías"),
+            S.documentTypeListItem("collection").title("Colecciones"),
           ]),
     }),
     visionTool({ defaultApiVersion: apiVersion }),

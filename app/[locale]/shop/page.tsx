@@ -1,11 +1,18 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { commerce } from "@/lib/commerce";
-import type { Category, Locale, ProductSummary } from "@/lib/commerce/types";
+import type {
+  Category,
+  CollectionRef,
+  Locale,
+  ProductSummary,
+} from "@/lib/commerce/types";
 import { routing } from "@/i18n/routing";
 import { buildPageMetadata, pageTitle } from "@/lib/seo";
 import { CategoryFilter } from "@/components/shop/CategoryFilter";
+import { ProductGrid } from "@/components/shop/ProductGrid";
 
 export { generateStaticParams } from "@/i18n/routing";
 
@@ -58,6 +65,19 @@ async function getCategoryList(locale: Locale): Promise<Category[]> {
   }
 }
 
+// Only title + slug travel to the client filter: the full collections (description,
+// cover) would be serialized into the page payload for nothing.
+async function getCollectionChips(locale: Locale): Promise<CollectionRef[]> {
+  try {
+    const collections = await commerce.getCollections(locale);
+    return collections.map(({ title, slug }) => ({ title, slug }));
+  } catch {
+    // Same fail-safe posture as the categories: no collection chips, never a
+    // broken shop.
+    return [];
+  }
+}
+
 export default async function ShopPage({
   params,
 }: {
@@ -73,9 +93,10 @@ export default async function ShopPage({
   // PENDING ARTISAN REVIEW, same status as `About`/`Contact` (task 5.5
   // content checklist).
   const t = await getTranslations("Shop");
-  const [products, categories] = await Promise.all([
+  const [products, categories, collections] = await Promise.all([
     getCatalog(locale),
     getCategoryList(locale),
+    getCollectionChips(locale),
   ]);
 
   return (
@@ -93,7 +114,17 @@ export default async function ShopPage({
           <span className="mt-2 block">{t("emptyBody")}</span>
         </p>
       ) : (
-        <CategoryFilter products={products} categories={categories} />
+        // The filter reads its starting selection from the URL, which a static
+        // page can only do on the client: until it hydrates, the unfiltered grid
+        // is what ships in the HTML (so crawlers and no-JS visitors still get the
+        // whole catalog).
+        <Suspense fallback={<ProductGrid products={products} />}>
+          <CategoryFilter
+            products={products}
+            categories={categories}
+            collections={collections}
+          />
+        </Suspense>
       )}
     </main>
   );

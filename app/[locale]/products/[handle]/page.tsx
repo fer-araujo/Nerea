@@ -156,6 +156,27 @@ export default async function ProductDetailPage({
             className="border-t border-line pt-4"
           />
 
+          {/* The visible collections the piece belongs to, as links: a piece in
+              "Día de Muertos" leads to the rest of it. Nothing renders for a
+              piece in none (or whose collections have closed). */}
+          {product.collections && product.collections.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-xs uppercase tracking-[0.14em] text-graphite">
+              <span>{t("collectionsLabel")}</span>
+              <ul className="flex flex-wrap gap-x-4 gap-y-1" role="list">
+                {product.collections.map((collection) => (
+                  <li key={collection.slug}>
+                    <Link
+                      href={`/colecciones/${collection.slug}`}
+                      className="text-ink underline decoration-line underline-offset-4 transition-colors hover:decoration-brass"
+                    >
+                      {collection.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Pick only the fields the client panel needs: the whole `product`
               (gallery media, description) would otherwise be serialized into
               the client payload for nothing. */}

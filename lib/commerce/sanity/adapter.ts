@@ -8,6 +8,7 @@ import type {
   Availability,
   Category,
   CommerceReadApi,
+  CommerceReadOptions,
   MediaItem,
   Product,
   ProductSummary,
@@ -74,10 +75,18 @@ interface RawAvailability {
   status: string;
 }
 
-// ISR-tagged fetch: 60s keeps a just-sold piece from lingering without
-// per-request latency; a Sanity webhook -> revalidateTag("products") is the
-// stretch upgrade for instant reflection (see design.md).
-function productsFetchOptions() {
+// Storefront reads are ISR-tagged: 60s is the safety net, and the Sanity
+// webhook (app/api/revalidate/route.ts) plus the sale paths expire the
+// PRODUCTS_TAG on demand so changes show up right away.
+//
+// `fresh` is the money-path escape hatch (checkoutAction): `cache: "no-store"`
+// and NO `next` key, because Next warns when a fetch sets both a cache mode and
+// `next.revalidate`. The ISR cache can serve a piece as available for a while
+// after it sold, which would let a one-of-one piece be sold twice.
+function productsFetchOptions(options?: CommerceReadOptions) {
+  if (options?.fresh) {
+    return { cache: "no-store" as const };
+  }
   return {
     next: { revalidate: PRODUCTS_REVALIDATE_SECONDS, tags: [PRODUCTS_TAG] },
   };
@@ -152,16 +161,16 @@ export const sanityApi: CommerceReadApi = {
     return products.map(toProductSummary);
   },
 
-  async getProductByHandle(handle, locale) {
+  async getProductByHandle(handle, locale, options) {
     const product = await sanityClient.fetch<RawProduct | null>(
       PRODUCT_BY_HANDLE_QUERY,
       { handle, locale },
-      productsFetchOptions(),
+      productsFetchOptions(options),
     );
     return product ? toProduct(product) : null;
   },
 
-  async getAvailability(handles) {
+  async getAvailability(handles, options) {
     const result: Record<string, Availability> = {};
     if (handles.length === 0) {
       return result;
@@ -170,7 +179,7 @@ export const sanityApi: CommerceReadApi = {
     const found = await sanityClient.fetch<RawAvailability[]>(
       AVAILABILITY_BY_HANDLES_QUERY,
       { handles },
-      productsFetchOptions(),
+      productsFetchOptions(options),
     );
 
     for (const handle of handles) {

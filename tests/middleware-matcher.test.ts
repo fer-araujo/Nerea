@@ -14,6 +14,10 @@ describe("middleware matcher pattern", () => {
   it.each([
     "/api/foo",
     "/api",
+    // The webhooks must reach their route handlers as-is: a locale rewrite
+    // would break signature verification and 404 them.
+    "/api/revalidate",
+    "/api/stripe/webhook",
     "/_next/static/a.js",
     "/_vercel/insights",
     "/favicon.ico",

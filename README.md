@@ -32,6 +32,7 @@ sandbox blocks writing any `.env*` file outright; rename it locally to
 | `STRIPE_SECRET_KEY` | server-only | Stripe key for Checkout Sessions (`sk_test_…` while testing, `sk_live_…` at launch); never prefix `NEXT_PUBLIC_`. The app fails safe (never throws, never logs the key) when unset. **It is also the payments switch:** while it is unset the cart offers "Apartar por mensaje" (a link to the contact form) instead of the checkout button, and the checkout Server Action refuses before reading Sanity. Set it and redeploy to turn payments on. |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | public | Stripe publishable key. |
 | `STRIPE_WEBHOOK_SECRET` | server-only | Signing secret for the Stripe webhook (`app/api/stripe/webhook/route.ts`), which marks a paid piece sold and records the sale; it must listen to `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Never prefix `NEXT_PUBLIC_`. Unset or invalid signatures fail closed (400, nothing processed). |
+| `SANITY_REVALIDATE_SECRET` | server-only | Shared secret for the Sanity webhook that calls `app/api/revalidate/route.ts` (setup in launch step 7). Unset or a wrong signature fails closed (`401`, nothing refreshed); pages then catch up within a minute (60s ISR). Never prefix `NEXT_PUBLIC_`. |
 | `SANITY_WRITE_TOKEN` | server-only | Write-capable token used to mark a paid piece `sold` (the Stripe webhook and the manual sale); never prefix `NEXT_PUBLIC_`. Never thrown on, never logged. **Unset is a failure, not a quiet no-op:** a paid piece can't be marked, so the webhook answers `500` (Stripe retries and shows it in its Dashboard) and a manual sale warns, by piece name, that the store was not updated. |
 | `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` | server-only | Firebase service account for the Admin SDK (Firestore + admin session cookies); never prefix `NEXT_PUBLIC_`. Unset or unusable: the contact form returns a server error and `/admin` login is refused (never throws, never logs the values). The private key may use literal `\n` sequences. |
 | `ADMIN_EMAILS` | server-only | Comma-separated allowlist of emails that may enter `/admin` (case-insensitive). Empty or unset means nobody (fails closed). Read on every admin request (never cached), so a removal applies as soon as the new environment is live (on Netlify, after a redeploy). To cut someone off immediately, disable their user in Firebase Authentication: sessions are revocation-checked on every request. |
@@ -238,6 +239,7 @@ configuration > Environment variables:
 | `NODE_VERSION` | `22` |
 | `NEXT_PUBLIC_SITE_URL` | The public URL, with protocol and no trailing slash (the `*.netlify.app` URL until a domain is connected). Canonical URLs, the sitemap and the Stripe redirects derive from it. |
 | `SANITY_WRITE_TOKEN` | Editor token from sanity.io/manage > API > Tokens; the Stripe webhook uses it to mark a purchased piece sold. |
+| `SANITY_REVALIDATE_SECRET` | A long random string; the same value goes into the Sanity webhook (step 7). |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Service account from the Firebase setup above (the key on one line, with literal `\n`). |
 | `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Firebase web app config. |
 | `ADMIN_EMAILS` | Comma-separated emails allowed into `/admin`. |
@@ -303,6 +305,33 @@ pinned as `deployment.appId` in `sanity.cli.ts`.
    for the shipping address and phone, the success page shows, and the webhook
    flips the piece to **Vendida** in Studio. Then switch to the live keys and
    webhook secret, redeploy, buy one real piece and refund it from the Dashboard.
+
+### 7. Sanity webhook (instant catalog updates)
+
+Without it the shop still catches up by itself: catalog pages are cached for up
+to 60 seconds. With it, an edit in Studio shows on the storefront right away.
+Checkout does not depend on either: it always re-reads availability and prices
+uncached, and a sale (Stripe webhook or manual sale) expires the cached catalog
+by itself.
+
+1. Netlify: set `SANITY_REVALIDATE_SECRET` to a long random string and
+   redeploy.
+2. sanity.io/manage > the project > API > Webhooks > Create webhook:
+   - **URL:** `https://<your-site>/api/revalidate`
+   - **Dataset:** `production`
+   - **Trigger on:** Create, Update and Delete
+   - **Filter:** `_type in ["product","category","siteSettings"]`
+   - **Projection:** `{_type}`
+   - **HTTP method:** `POST`
+   - **Secret:** the same value as `SANITY_REVALIDATE_SECRET`
+3. Test: edit a piece in Studio and publish. The webhook's delivery log in
+   sanity.io/manage should show a `200` whose body lists the refreshed tags. A
+   `401` means the secret is unset on the site or differs from the webhook's.
+
+A product refreshes the catalog; a category refreshes the categories and the
+catalog; the site settings refresh the settings and the catalog (the default
+ring sizes and chain lengths live there). Local development cannot receive the
+webhook, so it relies on the 60 second cache.
 
 ## Dependency notes
 

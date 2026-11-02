@@ -20,6 +20,7 @@ import {
   refreshSaleFeeSchema,
   voidSaleSchema,
 } from "@/lib/admin/schemas";
+import { updateProductsAfterSale } from "@/lib/commerce/revalidate";
 import { markProductsSold } from "@/lib/commerce/sanity/mark-sold";
 
 // Same order as every admin action: authorize FIRST, then validate the
@@ -91,9 +92,15 @@ export async function recordManualSaleAction(
   // to warn about.
   const notMarked: string[] = [];
   if (markSold) {
-    const { failed } = await markProductsSold(
+    const { marked, failed } = await markProductsSold(
       recorded.items.map((item) => item.handle),
     );
+    // The pieces that were marked are off the shelf: expire the cached catalog
+    // so the storefront stops offering them (best-effort: the sale is already
+    // recorded and must not turn into an error here).
+    if (marked.length > 0) {
+      updateProductsAfterSale();
+    }
     const titles = new Map(recorded.items.map((item) => [item.handle, item.title]));
     notMarked.push(...failed.map((handle) => titles.get(handle) ?? handle));
   }

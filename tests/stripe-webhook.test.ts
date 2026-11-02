@@ -25,6 +25,14 @@ vi.mock("@/lib/admin/data/stripe-sales", () => ({
   recordStripeSale: (...args: unknown[]) => recordStripeSaleMock(...args),
 }));
 
+// A Route Handler cannot use updateTag (Server Actions only): the webhook
+// expires the catalog with revalidateTag(tag, { expire: 0 }). Mocked because
+// the real one needs a live Next request context.
+const revalidateTagMock = vi.fn();
+vi.mock("next/cache", () => ({
+  revalidateTag: (...args: unknown[]) => revalidateTagMock(...args),
+}));
+
 import { POST } from "@/app/api/stripe/webhook/route";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -350,6 +358,90 @@ describe("POST /api/stripe/webhook — a paid session: recording and retries", (
 
     const logged = JSON.stringify(error.mock.calls);
     expect(logged).not.toContain("buyer@example.com");
+    expect(logged).not.toContain("anillo-plata");
+    expect(logged).not.toContain("cs_test_1");
+  });
+});
+
+describe("POST /api/stripe/webhook — expiring the cached catalog", () => {
+  it("expires the products tag immediately, after the pieces were marked sold", async () => {
+    eventOf("checkout.session.completed", session());
+
+    const response = await deliver();
+
+    expect(response.status).toBe(200);
+    expect(revalidateTagMock).toHaveBeenCalledTimes(1);
+    // { expire: 0 }: the next request is a blocking miss, never a stale hit
+    // that would keep showing the sold piece as available.
+    expect(revalidateTagMock).toHaveBeenCalledWith("products", { expire: 0 });
+    expect(markProductsSoldMock.mock.invocationCallOrder[0]).toBeLessThan(
+      revalidateTagMock.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("expires it for async_payment_succeeded too", async () => {
+    eventOf("checkout.session.async_payment_succeeded", session());
+
+    await deliver();
+
+    expect(revalidateTagMock).toHaveBeenCalledWith("products", { expire: 0 });
+  });
+
+  it("still expires it, once, when only some of the pieces were marked (the 500 stays)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    eventOf("checkout.session.completed", session({ metadata: { handles: "a,b,c" } }));
+    markProductsSoldMock.mockResolvedValue({ marked: ["a", "c"], missing: [], failed: ["b"] });
+
+    const response = await deliver();
+
+    expect(response.status).toBe(500);
+    expect(revalidateTagMock).toHaveBeenCalledTimes(1);
+    expect(revalidateTagMock).toHaveBeenCalledWith("products", { expire: 0 });
+  });
+
+  it.each([
+    ["every piece failed", { marked: [], missing: [], failed: ["anillo-plata"] }],
+    ["the product no longer exists", { marked: [], missing: ["anillo-plata"], failed: [] }],
+  ])("does not expire anything when %s: nothing left the shelf", async (_label, outcome) => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    eventOf("checkout.session.completed", session());
+    markProductsSoldMock.mockResolvedValue(outcome);
+
+    await deliver();
+
+    expect(revalidateTagMock).not.toHaveBeenCalled();
+  });
+
+  it("does not expire anything for an unpaid session, an unrelated event or a bad signature", async () => {
+    eventOf("checkout.session.completed", session({ payment_status: "unpaid" }));
+    await deliver();
+
+    eventOf("payment_intent.succeeded", {});
+    await deliver();
+
+    constructEventMock.mockImplementation(() => {
+      throw new Error("No signatures found matching the expected signature for payload");
+    });
+    await POST(makeRequest("{}", { "stripe-signature": "bad_sig" }));
+
+    expect(revalidateTagMock).not.toHaveBeenCalled();
+  });
+
+  it("never fails the delivery when the cache cannot be expired: a paid order is not worth a redelivery", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    eventOf("checkout.session.completed", session());
+    revalidateTagMock.mockImplementation(() => {
+      throw new Error("Invariant: static generation store missing in revalidateTag products");
+    });
+
+    const response = await deliver();
+
+    expect(response.status).toBe(200);
+    expect(recordStripeSaleMock).toHaveBeenCalledTimes(1);
+    // One fixed line: nothing of the error, the handle or the session is logged.
+    expect(error).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(error.mock.calls);
+    expect(logged).not.toContain("Invariant");
     expect(logged).not.toContain("anillo-plata");
     expect(logged).not.toContain("cs_test_1");
   });

@@ -131,6 +131,51 @@ describe("checkoutAction — sold guard", () => {
   });
 });
 
+// The storefront caches the catalog for up to a minute (ISR). A cached
+// "available" can outlive a sale, so the two reads that gate money must bypass
+// it: otherwise a one-of-one piece that just sold could still reach Stripe.
+describe("checkoutAction — fresh catalog reads", () => {
+  it("re-checks availability with an uncached read", async () => {
+    getAvailabilityMock.mockResolvedValue({ [LINE.handle]: "available" });
+    createCheckoutSessionMock.mockResolvedValue("https://checkout.stripe.com/c/s");
+
+    await checkoutAction([LINE], "es");
+
+    expect(getAvailabilityMock).toHaveBeenCalledTimes(1);
+    expect(getAvailabilityMock).toHaveBeenCalledWith([LINE.handle], { fresh: true });
+  });
+
+  it("re-prices every handle with an uncached read", async () => {
+    const other: CartLineItem = { ...LINE, handle: "aretes-luna" };
+    getAvailabilityMock.mockResolvedValue({
+      [LINE.handle]: "available",
+      [other.handle]: "available",
+    });
+    createCheckoutSessionMock.mockResolvedValue("https://checkout.stripe.com/c/s");
+
+    await checkoutAction([LINE, other], "es");
+
+    expect(getProductByHandleMock).toHaveBeenCalledTimes(2);
+    expect(getProductByHandleMock).toHaveBeenCalledWith(LINE.handle, "es", { fresh: true });
+    expect(getProductByHandleMock).toHaveBeenCalledWith(other.handle, "es", { fresh: true });
+  });
+
+  it("does not let a piece the uncached read reports as sold through, whatever the page showed", async () => {
+    // What the (cached) shop page may still say is irrelevant: only the
+    // uncached answer decides.
+    getAvailabilityMock.mockImplementation(
+      async (_handles: string[], options?: { fresh?: boolean }) => ({
+        [LINE.handle]: options?.fresh ? "sold" : "available",
+      }),
+    );
+
+    const result = await checkoutAction([LINE], "es");
+
+    expect(result).toEqual({ ok: false, reason: "sold", soldHandles: [LINE.handle] });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("checkoutAction — server-side re-pricing", () => {
   it("re-prices from the authoritative catalog and ignores a tampered client price/title/quantity, then redirects to the returned URL", async () => {
     // Deliberately tampered: a forged near-zero price, an inflated
@@ -151,7 +196,9 @@ describe("checkoutAction — server-side re-pricing", () => {
 
     await checkoutAction([tamperedLine], "es");
 
-    expect(getProductByHandleMock).toHaveBeenCalledWith(LINE.handle, "es");
+    expect(getProductByHandleMock).toHaveBeenCalledWith(LINE.handle, "es", {
+      fresh: true,
+    });
     expect(createCheckoutSessionMock).toHaveBeenCalledWith(
       [
         {
@@ -413,7 +460,9 @@ describe("checkoutAction — purchase options", () => {
       "en",
     );
 
-    expect(getProductByHandleMock).toHaveBeenCalledWith(LINE.handle, "en");
+    expect(getProductByHandleMock).toHaveBeenCalledWith(LINE.handle, "en", {
+      fresh: true,
+    });
     expect(createCheckoutSessionMock.mock.calls[0][0]).toEqual([
       {
         name: `${RING_PRODUCT.title} — Size 7`,

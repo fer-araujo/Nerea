@@ -22,8 +22,12 @@ vi.mock("@/lib/admin/auth/session", () => ({
 }));
 
 const revalidatePathMock = vi.fn();
+// updateTag is what a Server Action uses to expire the storefront's cached
+// catalog after a sale (lib/commerce/revalidate.ts).
+const updateTagMock = vi.fn();
 vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
+  updateTag: (...args: unknown[]) => updateTagMock(...args),
 }));
 
 let fake: FakeFirestore;
@@ -459,6 +463,75 @@ describe("recordManualSaleAction", () => {
     await recordManualSaleAction(form(SALE_FORM));
 
     expect(salesWhenMarked).toBe(1);
+  });
+
+  describe("expiring the storefront's cached catalog", () => {
+    it("expires the products tag with updateTag, after the piece was marked sold", async () => {
+      await recordManualSaleAction(form(SALE_FORM));
+
+      expect(updateTagMock).toHaveBeenCalledTimes(1);
+      expect(updateTagMock).toHaveBeenCalledWith("products");
+      expect(markProductsSoldMock.mock.invocationCallOrder[0]).toBeLessThan(
+        updateTagMock.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("still expires it when only some of several pieces could be marked", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      markProductsSoldMock.mockResolvedValue({
+        marked: ["anillo-luna"],
+        missing: [],
+        failed: ["aretes-sol"],
+      });
+
+      await recordManualSaleAction(
+        form({
+          date: TODAY,
+          itemHandle: ["anillo-luna", "aretes-sol"],
+          itemPrice: ["1850", "900"],
+          itemOption: ["", ""],
+          markSold: "on",
+        }),
+      );
+
+      expect(updateTagMock).toHaveBeenCalledWith("products");
+    });
+
+    it("does not expire anything when the piece was not marked sold in the store", async () => {
+      const withoutCheckbox: Record<string, string> = { ...SALE_FORM };
+      delete withoutCheckbox.markSold;
+
+      await recordManualSaleAction(form(withoutCheckbox));
+
+      expect(markProductsSoldMock).not.toHaveBeenCalled();
+      expect(updateTagMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["every piece failed", { marked: [], missing: [], failed: ["anillo-luna"] }],
+      ["the product no longer exists", { marked: [], missing: ["anillo-luna"], failed: [] }],
+    ])("does not expire anything when %s: nothing left the shelf", async (_label, outcome) => {
+      markProductsSoldMock.mockResolvedValue(outcome);
+
+      await recordManualSaleAction(form(SALE_FORM));
+
+      expect(updateTagMock).not.toHaveBeenCalled();
+    });
+
+    it("never turns a recorded sale into an error when the cache cannot be expired", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      updateTagMock.mockImplementation(() => {
+        throw new Error("updateTag can only be called from within a Server Action");
+      });
+
+      const result = await recordManualSaleAction(form(SALE_FORM));
+
+      expect(result).toEqual({ ok: true });
+      expect(fake.directChildren("sales")).toHaveLength(1);
+      // One fixed line: nothing of the error reaches the log.
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(error.mock.calls)).not.toContain("Server Action");
+    });
   });
 
   describe("the terminal's commission", () => {

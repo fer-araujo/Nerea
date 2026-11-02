@@ -40,6 +40,13 @@ vi.mock("@/lib/commerce/sanity/mark-sold", () => ({
   markProductsSold: (...args: unknown[]) => markProductsSoldMock(...args),
 }));
 
+// The route expires the cached catalog once a piece is marked sold; the real
+// revalidateTag needs a live Next request context.
+const revalidateTagMock = vi.fn();
+vi.mock("next/cache", () => ({
+  revalidateTag: (...args: unknown[]) => revalidateTagMock(...args),
+}));
+
 const getProductByHandleMock = vi.fn();
 vi.mock("@/lib/commerce", () => ({
   commerce: {
@@ -166,6 +173,13 @@ describe("webhook -> sales ledger: recording", () => {
       costPending: false,
       stripeSessionId: SESSION_ID,
     });
+  });
+
+  it("expires the cached catalog right after the piece is marked sold, so the shop stops offering it", async () => {
+    await deliver();
+
+    expect(revalidateTagMock).toHaveBeenCalledTimes(1);
+    expect(revalidateTagMock).toHaveBeenCalledWith("products", { expire: 0 });
   });
 
   it("stores the mode of the verified session and what Stripe charged for the payment", async () => {

@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import { recordStripeSale } from "@/lib/admin/data/stripe-sales";
 import { getStripeClient } from "@/lib/commerce/stripe/client";
+import { expireProductsAfterSale } from "@/lib/commerce/revalidate";
 import { markProductsSold } from "@/lib/commerce/sanity/mark-sold";
 import { parseHandles } from "@/lib/commerce/stripe/metadata";
 
@@ -34,9 +35,16 @@ async function fulfilPaidSession(
   // `markProductsSold` never throws: a piece it could not mark comes back in
   // `failed` (a missing token fails them all). A product that no longer exists
   // comes back in `missing`, which is not a failure.
-  const { failed } = await markProductsSold(
+  const { marked, failed } = await markProductsSold(
     parseHandles(session.metadata?.handles),
   );
+  // Whatever was marked is off the shelf now, even when a sibling piece
+  // failed: expire the cached catalog so the shop and the product pages stop
+  // offering it. Immediately, not stale-while-revalidate, and best-effort (see
+  // lib/commerce/revalidate.ts): it can never fail the delivery.
+  if (marked.length > 0) {
+    expireProductsAfterSale();
+  }
   if (failed.length > 0) {
     console.error(
       "[stripe] Pieces could not be marked sold; answering 500 so Stripe retries.",

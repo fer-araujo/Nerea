@@ -11,8 +11,13 @@ vi.mock("@/lib/commerce/sanity/client", async (importOriginal) => ({
   sanityClient: { fetch: (...args: unknown[]) => fetchMock(...args) },
 }));
 
+import { fixturesApi } from "@/lib/commerce/fixtures";
 import { DEFAULT_RING_SIZES } from "@/lib/commerce/options";
 import { sanityApi } from "@/lib/commerce/sanity/adapter";
+import {
+  PRODUCTS_REVALIDATE_SECONDS,
+  PRODUCTS_TAG,
+} from "@/lib/commerce/sanity/client";
 import { PRODUCT_BY_HANDLE_QUERY } from "@/lib/commerce/sanity/queries";
 
 function rawProduct(overrides: Record<string, unknown> = {}) {
@@ -66,6 +71,85 @@ describe("PRODUCT_BY_HANDLE_QUERY — purchase option projection", () => {
     expect(query).toContain("slug.current == $handle");
     expect(query).toContain("$locale");
     expect(query).not.toContain("anillo-luna");
+  });
+});
+
+// The third argument of sanityClient.fetch is what Next's fetch cache sees.
+describe("sanityApi — cache mode of the catalog reads", () => {
+  const ISR = {
+    next: { revalidate: PRODUCTS_REVALIDATE_SECONDS, tags: [PRODUCTS_TAG] },
+  };
+
+  function fetchOptionsOfLastCall() {
+    return fetchMock.mock.calls.at(-1)?.[2];
+  }
+
+  it("keeps the storefront on the tagged ISR cache by default", async () => {
+    fetchMock.mockResolvedValue(rawProduct());
+    await sanityApi.getProductByHandle("anillo-luna", "es");
+    expect(fetchOptionsOfLastCall()).toEqual(ISR);
+
+    fetchMock.mockResolvedValue([{ handle: "anillo-luna", status: "available" }]);
+    await sanityApi.getAvailability(["anillo-luna"]);
+    expect(fetchOptionsOfLastCall()).toEqual(ISR);
+  });
+
+  it("stays on the cache when fresh is explicitly false", async () => {
+    fetchMock.mockResolvedValue(rawProduct());
+    await sanityApi.getProductByHandle("anillo-luna", "es", { fresh: false });
+    expect(fetchOptionsOfLastCall()).toEqual(ISR);
+
+    fetchMock.mockResolvedValue([{ handle: "anillo-luna", status: "available" }]);
+    await sanityApi.getAvailability(["anillo-luna"], { fresh: false });
+    expect(fetchOptionsOfLastCall()).toEqual(ISR);
+  });
+
+  it("reads a product uncached when fresh is requested", async () => {
+    fetchMock.mockResolvedValue(rawProduct());
+
+    const product = await sanityApi.getProductByHandle("anillo-luna", "es", {
+      fresh: true,
+    });
+
+    expect(product?.handle).toBe("anillo-luna");
+    // no-store and NO `next` key: Next warns when a fetch sets both a cache
+    // mode and next.revalidate.
+    expect(fetchOptionsOfLastCall()).toEqual({ cache: "no-store" });
+    expect(fetchOptionsOfLastCall()).not.toHaveProperty("next");
+  });
+
+  it("reads availability uncached when fresh is requested, and still fails safe to sold", async () => {
+    fetchMock.mockResolvedValue([{ handle: "anillo-luna", status: "available" }]);
+
+    const availability = await sanityApi.getAvailability(
+      ["anillo-luna", "desconocido"],
+      { fresh: true },
+    );
+
+    expect(availability).toEqual({ "anillo-luna": "available", desconocido: "sold" });
+    expect(fetchOptionsOfLastCall()).toEqual({ cache: "no-store" });
+    expect(fetchOptionsOfLastCall()).not.toHaveProperty("next");
+  });
+
+  it("leaves the listing and the categories on the cache: fresh is not offered there", async () => {
+    fetchMock.mockResolvedValue([]);
+
+    await sanityApi.getProducts("es");
+    expect(fetchOptionsOfLastCall()).toEqual(ISR);
+
+    await sanityApi.getCategories("es");
+    expect(fetchOptionsOfLastCall()).toMatchObject({ next: { tags: ["categories"] } });
+  });
+
+  it("is accepted by the fixtures adapter too, where it changes nothing", async () => {
+    const [handle] = (await fixturesApi.getProducts("es")).map((p) => p.handle);
+
+    expect(await fixturesApi.getAvailability([handle], { fresh: true })).toEqual(
+      await fixturesApi.getAvailability([handle]),
+    );
+    expect(await fixturesApi.getProductByHandle(handle, "es", { fresh: true })).toEqual(
+      await fixturesApi.getProductByHandle(handle, "es"),
+    );
   });
 });
 

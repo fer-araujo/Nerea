@@ -61,6 +61,12 @@ export type CheckoutActionResult =
   | CheckoutInvalidOptionResult
   | CheckoutFailedResult;
 
+// Both catalog reads below skip the storefront's 60s ISR cache. A cached
+// "available" can outlive a sale by a while, and a one-of-one piece that just
+// sold must never reach Stripe a second time. Not exported: a "use server"
+// module may only export async functions.
+const FRESH_READ = { fresh: true } as const;
+
 // Prefers the configured public origin — same env var + trim/strip-trailing-
 // slash convention as lib/seo.ts's getSiteUrl() — so the Stripe success/
 // cancel redirect is built from a value the artisan controls, never from the
@@ -134,7 +140,7 @@ export async function checkoutAction(
         claimedOptions.set(line.handle, line.option);
       }
     }
-    const availability = await commerce.getAvailability(handles);
+    const availability = await commerce.getAvailability(handles, FRESH_READ);
     const soldHandles = handles.filter(
       (handle) => availability[handle] !== "available",
     );
@@ -156,7 +162,11 @@ export async function checkoutAction(
     const checkoutOptions: CheckoutOptionInput[] = [];
 
     for (const handle of handles) {
-      const product = await commerce.getProductByHandle(handle, locale);
+      const product = await commerce.getProductByHandle(
+        handle,
+        locale,
+        FRESH_READ,
+      );
       if (
         product === null ||
         product.availability !== "available" ||

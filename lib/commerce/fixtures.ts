@@ -152,6 +152,10 @@ function toProduct(product: FixtureProduct, locale: Locale): Product {
   };
 }
 
+// The fixtures are in-memory, so there is no cache to skip: the `fresh` read
+// option on getProductByHandle / getAvailability is accepted through the
+// CommerceReadApi signature (a method may declare fewer parameters) and is
+// naturally a no-op here.
 export const fixturesApi: CommerceReadApi = {
   async getProducts(locale) {
     return FIXTURE_PRODUCTS.map((product) => toSummary(product, locale));

@@ -101,11 +101,28 @@ export interface Product extends ProductSummary {
   options: ProductOptions;
 }
 
+export interface CommerceReadOptions {
+  /**
+   * Skip the storefront's ISR cache and read the live catalog. Reserved for
+   * money paths (checkoutAction): a cached "available" can be up to a minute
+   * old, long enough for a just-sold one-of-one piece to be sold twice. Pages
+   * must NOT set it: they stay on the cache.
+   */
+  fresh?: boolean;
+}
+
 export interface CommerceReadApi {
   getProducts(locale: Locale): Promise<ProductSummary[]>;
-  getProductByHandle(handle: string, locale: Locale): Promise<Product | null>;
+  getProductByHandle(
+    handle: string,
+    locale: Locale,
+    options?: CommerceReadOptions,
+  ): Promise<Product | null>;
   /** Pre-checkout guard: current availability for a set of handles. */
-  getAvailability(handles: string[]): Promise<Record<string, Availability>>;
+  getAvailability(
+    handles: string[],
+    options?: CommerceReadOptions,
+  ): Promise<Record<string, Availability>>;
   /** All product categories, localized, for the shop's filter chips. */
   getCategories(locale: Locale): Promise<Category[]>;
 }
